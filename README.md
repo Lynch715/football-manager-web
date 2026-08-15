@@ -2,7 +2,7 @@
 
 浏览器里的足球经理模拟游戏。**单文件、零依赖、不联网、手机可装**。
 
-👉 **在线试玩：** https://USERNAME.github.io/REPONAME/
+👉 **在线试玩：** https://Lynch715.github.io/football-manager-web/
 
 ![队徽总览](crests.png)
 
