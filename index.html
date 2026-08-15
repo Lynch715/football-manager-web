@@ -428,34 +428,86 @@ const LEAGUE_NAMES = ["英格兰超级联赛","英格兰冠军联赛","英格兰
 const LEAGUE_SHORT = ["英超","英冠","英甲"];
 const CUP_NAME = "足总杯";
 
-// ---------- 姓名池（虚构球员） ----------
-const FIRST_NAMES = ("James Oliver Harry Jack George Noah Charlie Thomas Oscar William Leo Henry Arthur Jacob Alfie Freddie Theo Archie Joshua Ethan "+
-"Lucas Mason Logan Isaac Max Finley Reuben Elliot Callum Ryan Dylan Owen Kieran Connor Aaron Nathan Joel Toby Marcus Jude "+
-"Kylian Antoine Hugo Lucien Mathis Enzo Rayan Nolan Theo Ousmane Ibrahim Amadou Moussa Youssef Karim Sofiane Nabil Yacine "+
-"Marco Lorenzo Matteo Alessandro Federico Riccardo Davide Nicolo Gianluca Andrea Stefano Emanuele "+
-"Diego Sergio Pablo Alvaro Javier Rodrigo Adrian Iker Unai Mikel Aitor Borja Gonzalo Nico "+
-"Lukas Jonas Niklas Florian Leon Tim Jannik Maximilian Felix Moritz Kai Pascal "+
-"Joao Bruno Rui Nuno Diogo Rafael Tiago Vitor Goncalo Miguel Andre "+
-"Lars Sven Bram Daan Sem Stijn Ruud Kasper Mikkel Emil Erik Anton Viktor Oskar "+
-"Luka Marko Ivan Stefan Milos Filip Nikola Andrej Bartosz Kacper Jakub Piotr "+
-"Kwame Kofi Samuel Emmanuel Daniel Michael Victor Chidi Femi Tunde Bakary Lamine").split(/\s+/);
+// ---------- 姓名池（虚构球员）----------
+// 每项为「英文|中文音译」。按语区分组，生成时先抽语区再抽名与姓，
+// 避免出现「Kylian Lewandowski」这类跨语区的错配。
+const NAME_POOLS = {
+  eng:{ w:39, n:"英格兰", c:"英格兰 英格兰 英格兰 英格兰 英格兰 英格兰 英格兰 苏格兰 威尔士 爱尔兰 北爱尔兰",
+    f:"James|詹姆斯 Oliver|奥利弗 Harry|哈里 Jack|杰克 George|乔治 Noah|诺亚 Charlie|查理 Thomas|托马斯 "+
+      "Oscar|奥斯卡 William|威廉 Leo|里奥 Henry|亨利 Arthur|阿瑟 Jacob|雅各布 Alfie|阿尔菲 Freddie|弗雷迪 "+
+      "Theo|西奥 Archie|阿奇 Joshua|约书亚 Ethan|伊桑 Lucas|卢卡斯 Mason|梅森 Logan|洛根 Isaac|艾萨克 "+
+      "Max|马克斯 Finley|芬利 Reuben|鲁本 Elliot|埃利奥特 Callum|卡勒姆 Ryan|瑞安 Dylan|迪伦 Owen|欧文 "+
+      "Kieran|基兰 Connor|康纳 Aaron|阿隆 Nathan|内森 Joel|乔尔 Toby|托比 Marcus|马库斯 Jude|裘德",
+    l:"Smith|史密斯 Johnson|约翰逊 Williams|威廉姆斯 Brown|布朗 Taylor|泰勒 Davies|戴维斯 Wilson|威尔逊 "+
+      "Evans|埃文斯 Thomas|托马斯 Roberts|罗伯茨 Walker|沃克 Wright|赖特 Robinson|罗宾逊 Thompson|汤普森 "+
+      "White|怀特 Hughes|休斯 Edwards|爱德华兹 Green|格林 Hall|霍尔 Wood|伍德 Harris|哈里斯 Clarke|克拉克 "+
+      "Jackson|杰克逊 Turner|特纳 Hill|希尔 Cooper|库珀 Ward|沃德 Morris|莫里斯 Moore|摩尔 Bailey|贝利 "+
+      "Cox|考克斯 Bennett|贝内特 Foster|福斯特 Marshall|马歇尔 Barnes|巴恩斯 Fletcher|弗莱彻 Chapman|查普曼 "+
+      "Gibson|吉布森 Ellis|埃利斯 Mitchell|米切尔 Palmer|帕尔默 Holmes|霍姆斯 Shaw|肖 Reid|里德 Kelly|凯利 "+
+      "Murphy|墨菲 Doyle|多伊尔 Byrne|伯恩 Quinn|奎因 Gallagher|加拉赫 Sullivan|沙利文 Boyd|博伊德 "+
+      "Lynch|林奇 Brennan|布伦南" },
+  fra:{ w:8, n:"法国", c:"法国 法国 法国 比利时 摩洛哥 阿尔及利亚",
+    f:"Kylian|基利安 Antoine|安托万 Hugo|雨果 Lucien|吕西安 Mathis|马蒂斯 Enzo|恩佐 Rayan|拉扬 Nolan|诺兰 "+
+      "Karim|卡里姆 Sofiane|索菲安 Yacine|亚辛 Nabil|纳比勒",
+    l:"Dubois|迪布瓦 Lefevre|勒费弗尔 Moreau|莫罗 Laurent|洛朗 Girard|吉拉尔 Bonnet|博内 Rousseau|卢梭 "+
+      "Mercier|梅西耶 Blanc|布兰克 Faure|福雷 Chevalier|谢瓦利耶 Perrin|佩兰 Dumas|杜马斯 Renard|勒纳尔" },
+  ita:{ w:7, n:"意大利", c:"意大利 意大利 意大利 瑞士",
+    f:"Marco|马尔科 Lorenzo|洛伦佐 Matteo|马泰奥 Alessandro|亚历山德罗 Federico|费德里科 Riccardo|里卡多 "+
+      "Davide|达维德 Nicolo|尼科洛 Gianluca|詹卢卡 Andrea|安德烈亚 Stefano|斯特凡诺 Emanuele|埃马努埃莱",
+    l:"Rossi|罗西 Conti|孔蒂 Ferrari|法拉利 Esposito|埃斯波西托 Bianchi|比安基 Romano|罗马诺 Colombo|科隆博 "+
+      "Ricci|里奇 Marino|马里诺 Greco|格雷科 Bruno|布鲁诺 Gallo|加洛 Costa|科斯塔 Fontana|丰塔纳" },
+  esp:{ w:8, n:"西班牙", c:"西班牙 西班牙 西班牙 阿根廷 乌拉圭",
+    f:"Diego|迭戈 Sergio|塞尔希奥 Pablo|巴勃罗 Alvaro|阿尔瓦罗 Javier|哈维尔 Rodrigo|罗德里戈 Adrian|阿德里安 "+
+      "Iker|伊克尔 Unai|乌奈 Mikel|米克尔 Aitor|艾托尔 Borja|博尔哈 Gonzalo|冈萨洛 Nico|尼科",
+    l:"Garcia|加西亚 Martinez|马丁内斯 Lopez|洛佩斯 Sanchez|桑切斯 Perez|佩雷斯 Gomez|戈麦斯 Ruiz|鲁伊斯 "+
+      "Torres|托雷斯 Ramos|拉莫斯 Castillo|卡斯蒂略 Navarro|纳瓦罗 Iglesias|伊格莱西亚斯 Delgado|德尔加多 Vidal|比达尔" },
+  ger:{ w:7, n:"德国", c:"德国 德国 德国 奥地利 瑞士",
+    f:"Lukas|卢卡斯 Jonas|约纳斯 Niklas|尼克拉斯 Florian|弗洛里安 Leon|莱昂 Tim|蒂姆 Jannik|扬尼克 "+
+      "Maximilian|马克西米利安 Felix|费利克斯 Moritz|莫里茨 Kai|凯 Pascal|帕斯卡",
+    l:"Muller|穆勒 Schmidt|施密特 Weber|韦伯 Wagner|瓦格纳 Becker|贝克尔 Hoffmann|霍夫曼 Schulz|舒尔茨 "+
+      "Koch|科赫 Richter|里希特 Klein|克莱因 Wolf|沃尔夫 Neumann|诺伊曼 Braun|布劳恩 Zimmermann|齐默尔曼" },
+  por:{ w:7, n:"葡萄牙", c:"葡萄牙 葡萄牙 巴西 巴西",
+    f:"Joao|若昂 Bruno|布鲁诺 Rui|鲁伊 Nuno|努诺 Diogo|迪奥戈 Rafael|拉斐尔 Tiago|蒂亚戈 Vitor|维托尔 "+
+      "Goncalo|贡萨洛 Miguel|米格尔 Andre|安德烈",
+    l:"Silva|席尔瓦 Santos|桑托斯 Ferreira|费雷拉 Pereira|佩雷拉 Oliveira|奥利维拉 Carvalho|卡瓦略 "+
+      "Almeida|阿尔梅达 Ribeiro|里贝罗 Lopes|洛佩斯 Marques|马尔克斯 Cardoso|卡多佐 Teixeira|特谢拉" },
+  ned:{ w:4, n:"荷兰", c:"荷兰 荷兰 荷兰 比利时",
+    f:"Bram|布拉姆 Daan|达安 Sem|塞姆 Stijn|斯泰恩 Ruud|鲁德 Sven|斯文",
+    l:"Jansen|扬森 Visser|维瑟 Bakker|巴克 Vermeulen|弗尔默伦 Meijer|梅耶尔 Hendriks|亨德里克斯" },
+  nor:{ w:4, n:"北欧", c:"丹麦 瑞典 挪威 芬兰 冰岛",
+    f:"Lars|拉尔斯 Kasper|卡斯珀 Mikkel|米凯尔 Emil|埃米尔 Erik|埃里克 Anton|安东 Viktor|维克多 Oskar|奥斯卡尔",
+    l:"Larsen|拉森 Nielsen|尼尔森 Andersen|安德森 Hansen|汉森 Lindberg|林德贝里 Bergstrom|贝里斯特伦 Nyman|尼曼" },
+  bal:{ w:3, n:"巴尔干", c:"塞尔维亚 克罗地亚 斯洛文尼亚 波黑 北马其顿",
+    f:"Luka|卢卡 Marko|马尔科 Ivan|伊万 Stefan|斯特凡 Milos|米洛什 Filip|菲利普 Nikola|尼古拉 Andrej|安德烈伊",
+    l:"Kovacic|科瓦契奇 Petrovic|彼得罗维奇 Novak|诺瓦克 Horvat|霍尔瓦特 Jovanovic|约万诺维奇 Ilic|伊利奇" },
+  pol:{ w:3, n:"波兰", c:"波兰 波兰 捷克 斯洛伐克",
+    f:"Bartosz|巴托什 Kacper|卡茨佩尔 Jakub|雅库布 Piotr|彼得",
+    l:"Kowalski|科瓦尔斯基 Nowak|诺瓦克 Wojcik|沃伊切克 Lewandowski|莱万多夫斯基 Zielinski|齐林斯基" },
+  afe:{ w:5, n:"西非(英语区)", c:"加纳 尼日利亚 尼日利亚 加纳 塞拉利昂",
+    f:"Kwame|夸梅 Kofi|科菲 Samuel|塞缪尔 Emmanuel|伊曼纽尔 Daniel|丹尼尔 Michael|迈克尔 Victor|维克托 "+
+      "Chidi|奇迪 Femi|费米 Tunde|通德",
+    l:"Mensah|门萨 Owusu|奥乌苏 Boateng|博阿滕 Asante|阿桑特 Adeyemi|阿德耶米 Okafor|奥卡福" },
+  aff:{ w:5, n:"西非(法语区)", c:"塞内加尔 科特迪瓦 马里 几内亚 喀麦隆",
+    f:"Bakary|巴卡里 Lamine|拉明 Ousmane|乌斯曼 Ibrahim|易卜拉欣 Amadou|阿马杜 Moussa|穆萨 Youssef|优素福",
+    l:"Diallo|迪亚洛 Traore|特拉奥雷 Camara|卡马拉 Sylla|西拉 Toure|图雷 Keita|凯塔 Cisse|西塞 Ndiaye|恩迪亚耶" }
+};
 
-const LAST_NAMES = ("Smith Johnson Williams Brown Taylor Davies Wilson Evans Thomas Roberts Walker Wright Robinson Thompson White Hughes Edwards Green Hall Wood "+
-"Harris Clarke Jackson Clark Turner Hill Cooper Ward Morris Moore Bailey Cox Bennett Foster Marshall Barnes Fletcher Chapman Gibson Ellis "+
-"Mitchell Palmer Holmes Shaw Reid Kelly Murphy Doyle Byrne Quinn Gallagher Sullivan Boyd Lynch Brennan "+
-"Dubois Lefevre Moreau Laurent Girard Bonnet Rousseau Mercier Blanc Faure Chevalier Perrin Dumas Renard "+
-"Rossi Conti Ferrari Esposito Bianchi Romano Colombo Ricci Marino Greco Bruno Gallo Costa Fontana "+
-"Garcia Martinez Lopez Sanchez Perez Gomez Ruiz Torres Ramos Castillo Navarro Iglesias Delgado Vidal "+
-"Muller Schmidt Weber Wagner Becker Hoffmann Schulz Koch Richter Klein Wolf Neumann Braun Zimmermann "+
-"Silva Santos Ferreira Pereira Oliveira Carvalho Almeida Ribeiro Lopes Marques Cardoso Teixeira "+
-"Jansen Visser Bakker Vermeulen Meijer Hendriks Larsen Nielsen Andersen Hansen Lindberg Bergstrom Nyman "+
-"Kovacic Petrovic Novak Horvat Jovanovic Ilic Kowalski Nowak Wojcik Lewandowski Zielinski "+
-"Mensah Owusu Boateng Asante Adeyemi Okafor Diallo Traore Camara Sylla Toure Keita Cisse Ndiaye").split(/\s+/);
-
-// 中文音译片段（用于生成中文译名）
-const CN_SYL1 = "巴贝戴德弗加哈杰卡拉马纳帕奎罗萨塔瓦韦扬扎布克多福格赫吉科勒莫诺波昆里索图乌沃西约兹".split("");
-const CN_SYL2 = "尔特斯尼恩姆里德托纳兰森文林顿曼奇诺瓦拉贝斯基安洛克罗切亚利".split("");
-const CN_SYL3 = "森斯基利多罗尼奇诺兹德夫拉茨曼奥托".split("");
+// 展开为「英文数组 + 中文对照表」，并按权重铺成抽签盘
+const NAME_CN = {};
+const REGIONS = [];
+const REGION_WHEEL = [];
+for(const k in NAME_POOLS){
+  const P=NAME_POOLS[k];
+  const parse = str => str.split(/\s+/).filter(Boolean).map(x=>{
+    const [en,cn]=x.split("|"); NAME_CN[en]=cn; return en;
+  });
+  P.first=parse(P.f); P.last=parse(P.l); P.nat=P.c.split(/\s+/).filter(Boolean);
+  REGIONS.push(k);
+  for(let i=0;i<P.w;i++) REGION_WHEEL.push(k);
+}
+// 全量池（球探搜索等场景需要）
+const FIRST_NAMES = REGIONS.flatMap(k=>NAME_POOLS[k].first);
+const LAST_NAMES  = REGIONS.flatMap(k=>NAME_POOLS[k].last);
 
 // ---------- 位置 ----------
 const POSITIONS = ["GK","DC","DL","DR","DM","MC","ML","MR","AM","ST"];
@@ -691,12 +743,7 @@ const R1=v=>Math.round(v*10)/10;
 // ---------- 中文译名 ----------
 function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);} return h>>>0; }
 function toCN(first,last){
-  const h=hashStr(last), h2=hashStr(first);
-  const g=(v,sh,arr)=>arr[((v>>>sh)>>>0) % arr.length];
-  let cn = g(h,0,CN_SYL1) + g(h,5,CN_SYL2);
-  if(((h>>>3)&1)) cn += g(h,11,CN_SYL3);
-  const fc = g(h2,0,CN_SYL1) + g(h2,7,CN_SYL2);
-  return fc+"·"+cn;
+  return (NAME_CN[first]||first) + "·" + (NAME_CN[last]||last);
 }
 
 // ---------- 属性生成 ----------
@@ -761,11 +808,12 @@ function calcWage(p, rep){
 let PID=1;
 function nextPid(){ if(WORLD && WORLD.pid!=null){ WORLD.pid++; return WORLD.pid; } return PID++; }
 function makePlayer(lvl, pos, age, clubId){
-  const first=pick(FIRST_NAMES), last=pick(LAST_NAMES);
+  const rg=pick(REGION_WHEEL), pool=NAME_POOLS[rg];
+  const first=pick(pool.first), last=pick(pool.last);
   const A=genAttrs(lvl,pos);
   const p={
     id:nextPid(), first, last, name:first+" "+last, cn:toCN(first,last),
-    pos, pos2:[], age, clubId,
+    pos, pos2:[], age, clubId, nat:pick(pool.nat), rg,
     a:A, ca:0, pa:0,
     condition:100, morale:ri(60,88), injury:0, injType:"", sharp:ri(70,95),
     contract:0, wage:0, value:0,
@@ -2381,6 +2429,7 @@ function showPlayer(pid){
       <table style="font-size:12px;width:100%">
         <tr><td class="hint">俱乐部</td><td>${club?esc(club.cn):"自由球员"}</td></tr>
         <tr><td class="hint">位置</td><td><span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span> ${p.pos2.map(x=>`<span class="tag t-n">${POS_CN[x]}</span>`).join("")}</td></tr>
+        <tr><td class="hint">国籍</td><td>${esc(p.nat||"—")}</td></tr>
         <tr><td class="hint">年龄</td><td>${p.age} 岁</td></tr>
         <tr><td class="hint">当前能力</td><td><b style="color:${caColor(p.ca)}">${ovr(p)}</b></td></tr>
         <tr><td class="hint">潜力</td><td>${hidePA?`<span class="hint">${paRange(p,know)}</span>`:`<b style="color:${caColor(p.pa)}">${Math.round(p.pa/2)}</b>`}</td></tr>
