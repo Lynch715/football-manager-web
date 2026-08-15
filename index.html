@@ -27,7 +27,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 html{
-  background:#0d1117;
+  background:var(--bg2);
   touch-action:pan-x pan-y;          /* 允许滚动，禁止双指缩放与双击放大 */
   overscroll-behavior:none;          /* 禁止下拉刷新与橡皮筋回弹 */
   -webkit-text-size-adjust:100%;text-size-adjust:100%;
@@ -47,7 +47,7 @@ input,textarea,select{-webkit-user-select:text;user-select:text}
 ::-webkit-scrollbar-thumb:hover{background:#465264}
 
 /* ---------- 布局 ---------- */
-#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#app{display:flex;flex-direction:column;height:100vh;height:100svh;overflow:hidden}
 #topbar{
   height:calc(52px + var(--sat));flex:0 0 calc(52px + var(--sat));
   background:linear-gradient(180deg,#1b2430,#141b24);
@@ -61,11 +61,12 @@ input,textarea,select{-webkit-user-select:text;user-select:text}
 .tb-stat b{display:block;font-size:13px}
 .tb-stat span{font-size:10px;color:var(--dim)}
 #tb-spacer{flex:1}
-#main{flex:1;display:flex;min-height:0}
+#main{flex:1;display:flex;min-height:0;min-width:0;overflow:hidden}
 #side{
   width:calc(172px + var(--sal));flex:0 0 calc(172px + var(--sal));
   background:var(--bg2);border-right:1px solid var(--line);
-  overflow-y:auto;padding:6px 0 var(--sab) var(--sal);
+  overflow-y:auto;overflow-anchor:none;min-height:0;min-width:0;
+  padding:6px 0 var(--sab) var(--sal);
 }
 .nav-grp{font-size:10px;color:var(--dim2);padding:10px 14px 4px;letter-spacing:1px}
 .nav{
@@ -76,7 +77,8 @@ input,textarea,select{-webkit-user-select:text;user-select:text}
 .nav.on{background:var(--bg3);color:var(--acc);border-left-color:var(--acc);font-weight:600}
 .nav i{font-style:normal;width:16px;text-align:center;opacity:.9}
 .nav .badge{margin-left:auto;background:var(--bad);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;font-weight:700}
-#view{flex:1;overflow-y:auto;background:var(--bg);
+#view{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-anchor:none;
+  -webkit-overflow-scrolling:touch;background:var(--bg);
   padding:16px calc(20px + var(--sar)) calc(40px + var(--sab)) 20px}
 
 /* ---------- 通用组件 ---------- */
@@ -230,16 +232,22 @@ img.crest{display:inline-block}
   .s-pos{display:none}
   #tb-go{padding:7px 13px !important;font-size:12px;margin-left:6px !important}
 
-  /* 导航移到底部 */
-  #main{flex-direction:column-reverse}
-  #side{width:100%;flex:0 0 auto;display:flex;overflow-x:auto;overflow-y:hidden;
+  /* 导航移到底部：用 order 而非 column-reverse，避免反向弹性容器的重排抖动 */
+  #main{flex-direction:column}
+  #view{order:1}
+  #side{order:2;
+    width:100%;
+    height:calc(54px + var(--sab));flex:0 0 calc(54px + var(--sab));
+    display:flex;align-items:stretch;
+    overflow-x:auto;overflow-y:hidden;overflow-anchor:none;
     border-right:none;border-top:1px solid var(--line);
     padding:0 var(--sar) var(--sab) var(--sal);
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
-  .nav{position:relative;flex-direction:column;gap:1px;padding:7px 12px 6px;border-left:none;border-top:3px solid transparent;
-    font-size:10px;white-space:nowrap;min-width:56px;justify-content:center}
+  .nav{position:relative;flex:0 0 auto;flex-direction:column;gap:1px;padding:6px 12px;
+    border-left:none;border-top:3px solid transparent;line-height:1.25;
+    font-size:10px;white-space:nowrap;min-width:56px;justify-content:center;align-items:center}
   .nav.on{border-left-color:transparent;border-top-color:var(--acc)}
   .nav i{width:auto;font-size:17px}
   .nav .badge{position:absolute;transform:translate(14px,-4px)}
@@ -265,7 +273,7 @@ img.crest{display:inline-block}
 
   /* 弹窗全屏 */
   #modal{padding:0;align-items:stretch}
-  #modal-box{max-height:100vh;max-height:100dvh;border-radius:0;max-width:none}
+  #modal-box{max-height:100vh;max-height:100svh;border-radius:0;max-width:none}
   #modal-hd{padding-top:calc(13px + var(--sat));
     padding-left:calc(16px + var(--sal));padding-right:calc(16px + var(--sar))}
   #modal-bd{padding:12px calc(12px + var(--sar)) 12px calc(12px + var(--sal))}
@@ -296,10 +304,14 @@ img.crest{display:inline-block}
   #tb-crest{width:24px;height:24px;flex:0 0 24px}
   #tb-crest img{width:24px;height:24px}
   #main{flex-direction:row}
-  #side{width:calc(60px + var(--sal));flex:0 0 calc(60px + var(--sal));flex-direction:column;
+  #view{order:2}
+  #side{order:1;
+    width:calc(60px + var(--sal));flex:0 0 calc(60px + var(--sal));
+    height:auto;flex-direction:column;align-items:stretch;
     overflow-y:auto;overflow-x:hidden;
     border-top:none;border-right:1px solid var(--line);
     padding:2px 0 var(--sab) var(--sal)}
+  .nav{flex:0 0 auto}
   .nav{min-width:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
   .nav.on{border-left-color:var(--acc);border-top-color:transparent}
   #view{padding:9px calc(11px + var(--sar)) calc(16px + var(--sab)) 11px}
@@ -312,7 +324,7 @@ img.crest{display:inline-block}
   .tac-pitch>div[style*="aspect-ratio"]{max-height:260px !important;min-height:200px !important}
   .grid2{grid-template-columns:1fr 1fr}
   .grid4{grid-template-columns:repeat(4,1fr)}
-  #modal-box{max-height:100dvh}
+  #modal-box{max-height:100svh}
 }
 </style>
 </head>
@@ -3133,6 +3145,7 @@ function startUserMatch(fx){
 function vMatch(v){
   const M=CURMATCH;
   if(!M){ v.innerHTML='<div class="empty">当前没有进行中的比赛</div>'; return; }
+  ANIM.evShown=0;                    // 视图重建（如旋转屏幕）后重新铺满事件流
   const H=C(M.h), A=C(M.a);
   v.innerHTML=`
    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
@@ -3663,8 +3676,28 @@ function lockZoom(){
   });
 }
 
+// 屏幕旋转：等布局稳定后重绘一次，避免残留滚动偏移与半旧布局
+let _oriT=0, _oriLast="";
+function watchOrientation(){
+  const key=()=>innerWidth>innerHeight?"L":"P";
+  _oriLast=key();
+  const on=()=>{
+    if(key()===_oriLast) return;
+    _oriLast=key();
+    clearTimeout(_oriT);
+    _oriT=setTimeout(()=>{
+      const s=document.getElementById("side"); if(s){ s.scrollLeft=0; s.scrollTop=0; }
+      const v=document.getElementById("view"); if(v) v.scrollTop=0;
+      try{ render(); }catch(e){}
+    },260);
+  };
+  window.addEventListener("orientationchange",on);
+  window.addEventListener("resize",on);
+}
+
 window.addEventListener("DOMContentLoaded",()=>{
   lockZoom();
+  watchOrientation();
   registerSW();
   loadCustomCrests();
   document.getElementById("tb-go").onclick=onContinue;
