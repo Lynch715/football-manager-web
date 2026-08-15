@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0d1117">
 <meta name="mobile-web-app-capable" content="yes">
@@ -18,14 +18,29 @@
   --txt:#e6edf3; --dim:#8b98a8; --dim2:#5f6b7a;
   --acc:#00d47e; --acc2:#0a8f57; --warn:#f0a020; --bad:#e5484d; --info:#4a9eff;
   --gold:#ffcc44;
+  /* 刘海 / 灵动岛 / home 指示条安全区 */
+  --sat:env(safe-area-inset-top,0px);
+  --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px);
+  --sar:env(safe-area-inset-right,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
+html{
+  background:#0d1117;
+  touch-action:pan-x pan-y;          /* 允许滚动，禁止双指缩放与双击放大 */
+  overscroll-behavior:none;          /* 禁止下拉刷新与橡皮筋回弹 */
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
+}
 body{
   background:var(--bg);color:var(--txt);
   font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
   overflow:hidden;-webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  -webkit-tap-highlight-color:rgba(0,212,126,.18);
 }
+input,textarea,select{-webkit-user-select:text;user-select:text}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:#333d4b;border-radius:5px}
@@ -34,8 +49,10 @@ body{
 /* ---------- 布局 ---------- */
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
 #topbar{
-  height:52px;flex:0 0 52px;background:linear-gradient(180deg,#1b2430,#141b24);
-  border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:14px;
+  height:calc(52px + var(--sat));flex:0 0 calc(52px + var(--sat));
+  background:linear-gradient(180deg,#1b2430,#141b24);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;
+  padding:var(--sat) calc(14px + var(--sar)) 0 calc(14px + var(--sal));
 }
 #tb-crest{width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 34px}
 #tb-club{font-weight:700;font-size:14px;line-height:1.15}
@@ -46,8 +63,9 @@ body{
 #tb-spacer{flex:1}
 #main{flex:1;display:flex;min-height:0}
 #side{
-  width:172px;flex:0 0 172px;background:var(--bg2);border-right:1px solid var(--line);
-  overflow-y:auto;padding:6px 0;
+  width:calc(172px + var(--sal));flex:0 0 calc(172px + var(--sal));
+  background:var(--bg2);border-right:1px solid var(--line);
+  overflow-y:auto;padding:6px 0 var(--sab) var(--sal);
 }
 .nav-grp{font-size:10px;color:var(--dim2);padding:10px 14px 4px;letter-spacing:1px}
 .nav{
@@ -58,7 +76,8 @@ body{
 .nav.on{background:var(--bg3);color:var(--acc);border-left-color:var(--acc);font-weight:600}
 .nav i{font-style:normal;width:16px;text-align:center;opacity:.9}
 .nav .badge{margin-left:auto;background:var(--bad);color:#fff;border-radius:9px;padding:0 6px;font-size:10px;font-weight:700}
-#view{flex:1;overflow-y:auto;padding:16px 20px 40px}
+#view{flex:1;overflow-y:auto;background:var(--bg);
+  padding:16px calc(20px + var(--sar)) calc(40px + var(--sab)) 20px}
 
 /* ---------- 通用组件 ---------- */
 h1{font-size:19px;font-weight:700;margin-bottom:3px}
@@ -138,7 +157,8 @@ img.crest{display:inline-block}
 
 /* ---------- 弹窗 ---------- */
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;z-index:100;
-  align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(2px)}
+  align-items:center;justify-content:center;backdrop-filter:blur(2px);
+  padding:calc(24px + var(--sat)) calc(24px + var(--sar)) calc(24px + var(--sab)) calc(24px + var(--sal))}
 #modal.on{display:flex}
 #modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
   max-width:900px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)}
@@ -150,7 +170,7 @@ img.crest{display:inline-block}
 #modal-ft{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
 
 /* ---------- 提示条 ---------- */
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;
+#toast{position:fixed;bottom:calc(20px + var(--sab));left:50%;transform:translateX(-50%);z-index:200;
   display:flex;flex-direction:column;gap:7px;align-items:center;pointer-events:none}
 .toast{background:#1f2937;border:1px solid var(--line);border-left:3px solid var(--acc);
   border-radius:6px;padding:9px 15px;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,.5);
@@ -199,7 +219,8 @@ img.crest{display:inline-block}
 
 @media (max-width:900px){
   body{font-size:13px}
-  #topbar{height:46px;flex:0 0 46px;padding:0 8px;gap:8px}
+  #topbar{height:calc(46px + var(--sat));flex:0 0 calc(46px + var(--sat));gap:8px;
+    padding:var(--sat) calc(8px + var(--sar)) 0 calc(8px + var(--sal))}
   #tb-crest{width:28px;height:28px;flex:0 0 28px}
   #tb-crest img{width:28px;height:28px}
   #tb-club{font-size:12.5px}
@@ -212,7 +233,8 @@ img.crest{display:inline-block}
   /* 导航移到底部 */
   #main{flex-direction:column-reverse}
   #side{width:100%;flex:0 0 auto;display:flex;overflow-x:auto;overflow-y:hidden;
-    border-right:none;border-top:1px solid var(--line);padding:0 0 env(safe-area-inset-bottom);
+    border-right:none;border-top:1px solid var(--line);
+    padding:0 var(--sar) var(--sab) var(--sal);
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
@@ -221,7 +243,7 @@ img.crest{display:inline-block}
   .nav.on{border-left-color:transparent;border-top-color:var(--acc)}
   .nav i{width:auto;font-size:17px}
   .nav .badge{position:absolute;transform:translate(14px,-4px)}
-  #view{padding:11px 11px 24px}
+  #view{padding:11px calc(11px + var(--sar)) 24px calc(11px + var(--sal))}
 
   /* 单栏堆叠 */
   .grid2,.grid3{grid-template-columns:1fr}
@@ -243,8 +265,12 @@ img.crest{display:inline-block}
 
   /* 弹窗全屏 */
   #modal{padding:0;align-items:stretch}
-  #modal-box{max-height:100vh;border-radius:0;max-width:none}
-  #modal-bd{padding:12px}
+  #modal-box{max-height:100vh;max-height:100dvh;border-radius:0;max-width:none}
+  #modal-hd{padding-top:calc(13px + var(--sat));
+    padding-left:calc(16px + var(--sal));padding-right:calc(16px + var(--sar))}
+  #modal-bd{padding:12px calc(12px + var(--sar)) 12px calc(12px + var(--sal))}
+  #modal-ft{padding-bottom:calc(11px + var(--sab));
+    padding-left:calc(16px + var(--sal));padding-right:calc(16px + var(--sar))}
   #modal-bd table{min-width:max-content}
 
   /* 比赛日 */
@@ -266,15 +292,17 @@ img.crest{display:inline-block}
 
 /* 横屏手机：保留左侧图标导航，纵向空间优先 */
 @media (max-height:520px) and (orientation:landscape){
-  #topbar{height:40px;flex:0 0 40px}
+  #topbar{height:calc(40px + var(--sat));flex:0 0 calc(40px + var(--sat));padding-top:var(--sat)}
   #tb-crest{width:24px;height:24px;flex:0 0 24px}
   #tb-crest img{width:24px;height:24px}
   #main{flex-direction:row}
-  #side{width:60px;flex:0 0 60px;flex-direction:column;overflow-y:auto;overflow-x:hidden;
-    border-top:none;border-right:1px solid var(--line);padding:2px 0}
+  #side{width:calc(60px + var(--sal));flex:0 0 calc(60px + var(--sal));flex-direction:column;
+    overflow-y:auto;overflow-x:hidden;
+    border-top:none;border-right:1px solid var(--line);
+    padding:2px 0 var(--sab) var(--sal)}
   .nav{min-width:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
   .nav.on{border-left-color:var(--acc);border-top-color:transparent}
-  #view{padding:9px 11px 16px}
+  #view{padding:9px calc(11px + var(--sar)) calc(16px + var(--sab)) 11px}
   #mfeed{height:150px}
   .card{margin-bottom:9px}
   .col{min-width:0 !important}
@@ -3412,6 +3440,17 @@ function vSave(v){
   g.appendChild(c2);
   v.appendChild(g);
 
+  const up=el("div","card");
+  up.innerHTML=`<h3>版本与更新 ${UPDATE_READY?'<span class="tag t-w">有新版本</span>':''}</h3>
+    <div class="hint">${UPDATE_READY
+      ? "新版本已下载完成。<b style=\"color:var(--warn)\">请先在上方保存进度</b>，然后点击下方按钮应用更新。"
+      : "全屏模式下没有浏览器刷新按钮。如果怀疑用的是旧版本，可在此强制拉取最新版（会先清空离线缓存）。"}</div>
+    <div class="hr"></div>`;
+  const ub=el("button", UPDATE_READY?"pri":"", UPDATE_READY?"应用更新并重新载入":"检查更新 / 强制刷新");
+  ub.onclick=()=>{ toast("正在拉取最新版本…"); setTimeout(applyUpdate,400); };
+  up.appendChild(ub);
+  v.appendChild(up);
+
   const nn=el("div","card"); nn.innerHTML="<h3>重新开始</h3><div class='hint'>放弃当前进度，选择新的俱乐部</div><div class='hr'></div>";
   const nb=el("button","danger","开始新游戏");
   nb.onclick=()=>{ if(confirm("确定放弃当前进度并重新开始？")) newGameScreen(); };
@@ -3569,10 +3608,34 @@ function onContinue(){
 
 /* ---------- 启动 ---------- */
 /* ---------- PWA：可安装 + 离线 ---------- */
+let UPDATE_READY=false;
 function registerSW(){
   if(!("serviceWorker" in navigator)) return;
   if(!/^https?:$/.test(location.protocol)) return;   // file:// 下跳过
-  navigator.serviceWorker.register("sw.js").catch(()=>{});
+  const hadController=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js").then(reg=>{
+    reg.addEventListener("updatefound",()=>{
+      const nw=reg.installing; if(!nw) return;
+      nw.addEventListener("statechange",()=>{
+        // 已有旧版本在跑，且新版本装好了 → 提示而不是直接刷新，避免冲掉未保存的进度
+        if(nw.state==="installed" && hadController && !UPDATE_READY){
+          UPDATE_READY=true;
+          toast("已下载新版本：请先保存进度，再到「存档」页点『应用更新』","warn");
+          if(VIEW==="save") render();
+        }
+      });
+    });
+    setInterval(()=>reg.update().catch(()=>{}), 30*60*1000);
+  }).catch(()=>{});
+}
+// 全屏模式下没有地址栏也没有下拉刷新，这里提供手动更新出口
+function applyUpdate(){
+  if(!("serviceWorker" in navigator)){ location.reload(); return; }
+  navigator.serviceWorker.getRegistrations()
+    .then(rs=>Promise.all(rs.map(r=>r.unregister())))
+    .then(()=>caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))))
+    .catch(()=>{})
+    .then(()=>location.reload(true));
 }
 // 离线可用提示（仅首次）
 function offlineHint(){
@@ -3584,7 +3647,24 @@ function offlineHint(){
   }catch(e){}
 }
 
+/* ---------- 移动端手势：彻底关掉缩放 ---------- */
+function lockZoom(){
+  // iOS Safari 会忽略 user-scalable=no，需拦截 gesture 事件
+  ["gesturestart","gesturechange","gestureend"].forEach(t=>
+    document.addEventListener(t, e=>e.preventDefault(), {passive:false}));
+  // 双指 touchmove 兜底（不影响单指滚动）
+  document.addEventListener("touchmove", e=>{
+    if(e.touches && e.touches.length>1) e.preventDefault();
+  }, {passive:false});
+  // 万一被浏览器缩放过，切回前台时复位
+  document.addEventListener("visibilitychange",()=>{
+    if(!document.hidden && window.visualViewport && window.visualViewport.scale>1.01)
+      window.scrollTo(0,0);
+  });
+}
+
 window.addEventListener("DOMContentLoaded",()=>{
+  lockZoom();
   registerSW();
   loadCustomCrests();
   document.getElementById("tb-go").onclick=onContinue;
