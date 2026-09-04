@@ -246,13 +246,15 @@ img.crest{display:inline-block}
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
-  .nav{position:relative;flex:1 1 11%;flex-direction:column;gap:0;padding:2px 1px 4px;
-    border-left:none;border-top:3px solid transparent;line-height:1.15;
-    font-size:9.5px;white-space:nowrap;min-width:0;justify-content:center;align-items:center;
+  .nav{position:relative;flex:1 1 10%;flex-direction:column;gap:1px;
+    margin:3px 1px 1px;padding:4px 0 3px;border-radius:9px;
+    border-left:none;border-top:none;line-height:1.1;
+    font-size:9px;white-space:nowrap;min-width:0;justify-content:center;align-items:center;
     overflow:hidden}
-  .nav.on{border-left-color:transparent;border-top-color:var(--acc)}
-  .nav i{width:auto;font-size:15px;line-height:1.1}
-  .nav .badge{position:absolute;transform:translate(13px,-3px)}
+  .nav:hover{background:none;color:var(--dim)}
+  .nav.on{background:rgba(0,212,126,.12);color:var(--acc);font-weight:600}
+  .nav i{width:auto;font-size:16px;line-height:1.25;opacity:1}
+  .nav .badge{position:absolute;top:1px;right:50%;transform:translate(16px,0);margin:0}
   /* 底栏已经吃掉安全区，视图底部不要再补一次，否则留白翻倍 */
   #view{padding:11px calc(11px + var(--sar)) 10px calc(11px + var(--sal))}
 
@@ -315,8 +317,8 @@ img.crest{display:inline-block}
     border-top:none;border-right:1px solid var(--line);
     padding:2px 0 var(--sab) var(--sal)}
   .nav{flex:0 0 auto}
-  .nav{min-width:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
-  .nav.on{border-left-color:var(--acc);border-top-color:transparent}
+  .nav{min-width:0;margin:0;border-radius:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
+  .nav.on{background:var(--bg3);border-left-color:var(--acc);border-top-color:transparent}
   #view{padding:9px calc(11px + var(--sar)) calc(16px + var(--sab)) 11px}
   #mfeed{height:150px}
   .card{margin-bottom:9px}
