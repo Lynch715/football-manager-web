@@ -3183,6 +3183,8 @@ const SPEEDS=[["0.5×",0.5],["1×",1],["2×",2],["4×",4],["8×",8]];
 const PHASE_MS=230;
 
 function startUserMatch(fx){
+  // 防御：同一场比赛已有未结算的实例，不重开（重开会重掷随机结果）
+  if(CURMATCH && CURMATCH.h===fx.home && CURMATCH.a===fx.away){ VIEW="match"; render(); return; }
   const side = fx.home===WORLD.userClub?0:1;
   CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round,
      knockout:fx.comp==="C", record:true, userSide:side});
@@ -3239,6 +3241,8 @@ function bindMatchControls(){
     document.querySelectorAll(".spd").forEach(b=>b.onclick=()=>{
       ANIM.speed=+b.dataset.s; document.querySelectorAll(".spd").forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
     drawPitch(); refreshMatchUI();
+    // 比赛已结束时重建视图（旋转屏幕、切页返回等）：必须重新露出「完成比赛」按钮
+    if(CURMATCH && CURMATCH.done){ ANIM.ended=true; ANIM.playing=false; onMatchEnd(); }
   }
 }
 
@@ -3659,10 +3663,20 @@ function onContinue(){
   if(BUSY) return;
   if(WORLD.gameOver){ openModal("下课",`<div>${esc(WORLD.gameOver)}</div>`,
      `<button class="pri" onclick="closeModal();newGameScreen()">重新开始</button>`); return; }
-  if(CURMATCH && !CURMATCH.done){ VIEW="match"; render(); return; }
+  // 有未结算的用户比赛：未打完 → 回到比赛页；已打完 → 直接结算，否则会卡住
+  if(CURMATCH){
+    if(!CURMATCH.done){ VIEW="match"; render(); return; }
+    BUSY=true;
+    try{ completeMatch(); }
+    catch(err){ console.error(err); toast("结算比赛出错："+(err&&err.message||err),"bad"); }
+    finally{ BUSY=false; }
+    return;
+  }
   BUSY=true;
-  const r=advance();
-  BUSY=false;
+  let r;
+  try{ r=advance(); }
+  catch(err){ console.error(err); toast("推进失败："+(err&&err.message||err),"bad"); return; }
+  finally{ BUSY=false; }   // 出错也要解锁，否则「继续」会永久失效
   if(r.t==="match"){ startUserMatch(r.fx); return; }
   if(r.t==="season"){ render(); showSeasonEnd(); return; }
   render();
@@ -3752,8 +3766,9 @@ window.addEventListener("DOMContentLoaded",()=>{
   document.getElementById("tb-go").onclick=onContinue;
   document.addEventListener("keydown",e=>{
     if(e.key==="Escape") closeModal();
-    if(e.code==="Space" && VIEW==="match"){ e.preventDefault(); toggleplay(); }
-    if(e.key==="Enter" && !$("#modal").classList.contains("on") && VIEW!=="match") onContinue();
+    if(e.code==="Space" && VIEW==="match" && CURMATCH && !CURMATCH.done){ e.preventDefault(); toggleplay(); }
+    if(e.key==="Enter" && !$("#modal").classList.contains("on")
+       && (VIEW!=="match" || (CURMATCH && CURMATCH.done))) onContinue();
   });
   setTimeout(()=>{ newGameScreen(); offlineHint(); },450);
 });
