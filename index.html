@@ -235,19 +235,21 @@ img.crest{display:inline-block}
   /* 导航移到底部：用 order 而非 column-reverse，避免反向弹性容器的重排抖动 */
   #main{flex-direction:column}
   #view{order:1}
+  /* 两排固定导航：9 + 8，全部可见，无需横向滚动 */
   #side{order:2;
     width:100%;
-    height:calc(46px + var(--sab));flex:0 0 calc(46px + var(--sab));
-    display:flex;align-items:stretch;
-    overflow-x:auto;overflow-y:hidden;overflow-anchor:none;
+    height:auto;flex:0 0 auto;
+    display:flex;flex-wrap:wrap;align-items:stretch;
+    overflow:hidden;overflow-anchor:none;
     border-right:none;border-top:1px solid var(--line);
     padding:0 var(--sar) var(--sab) var(--sal);
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
-  .nav{position:relative;flex:0 0 auto;flex-direction:column;gap:0;padding:3px 11px;
+  .nav{position:relative;flex:1 1 11%;flex-direction:column;gap:0;padding:2px 1px 4px;
     border-left:none;border-top:3px solid transparent;line-height:1.15;
-    font-size:9.5px;white-space:nowrap;min-width:52px;justify-content:center;align-items:center}
+    font-size:9.5px;white-space:nowrap;min-width:0;justify-content:center;align-items:center;
+    overflow:hidden}
   .nav.on{border-left-color:transparent;border-top-color:var(--acc)}
   .nav i{width:auto;font-size:15px;line-height:1.1}
   .nav .badge{position:absolute;transform:translate(13px,-3px)}
@@ -296,7 +298,7 @@ img.crest{display:inline-block}
   .grid4{grid-template-columns:1fr 1fr}
   .s-next{display:none}
   #tb-club{max-width:96px;overflow:hidden}
-  .nav{min-width:48px;padding:3px 8px}
+  .nav{font-size:9px}
 }
 
 /* 横屏手机：保留左侧图标导航，纵向空间优先 */
@@ -308,7 +310,7 @@ img.crest{display:inline-block}
   #view{order:2}
   #side{order:1;
     width:calc(60px + var(--sal));flex:0 0 calc(60px + var(--sal));
-    height:auto;flex-direction:column;align-items:stretch;
+    height:auto;flex-direction:column;flex-wrap:nowrap;align-items:stretch;
     overflow-y:auto;overflow-x:hidden;
     border-top:none;border-right:1px solid var(--line);
     padding:2px 0 var(--sab) var(--sal)}
@@ -1686,7 +1688,8 @@ function dailyTick(){
         if(c.id===WORLD.userClub) news(`${p.cn} 训练中受伤`,`${p.cn} 在训练中受伤，预计缺阵 ${p.injury} 天。`,"bad");
       }});
   });
-  // 球探进度
+  // 球探进度（先清掉已退役/被删除球员的条目，否则 P(sl.id) 为 undefined 会让推进崩溃）
+  WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>P(sl.id));
   WORLD.shortlist.forEach(sl=>{
     const c=UC(); sl.know=clamp((sl.know||0)+c.scoutRating*0.55+2,0,100);
     const p=P(sl.id); p.scouted = sl.know>=95?2: sl.know>=45?1:0;
@@ -2042,6 +2045,8 @@ function endSeason(){
       c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; WORLD.freeAgents.push(worst.id);
     }
   });
+  // 清理关注名单里已不存在的球员（退役 / 自由市场清理）
+  WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
   WORLD.day=0; WORLD.fired=false; WORLD.offers=[];
   WORLD.clubs.forEach(c=>{
