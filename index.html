@@ -916,6 +916,8 @@ function newWorld(seed, userClubIdx, userTier){
     p.wage=calcWage(p,30); p.value=Math.round(calcValue(p)*0.4); p.contract=WORLD.season;
     WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
   }
+  // 初代超级妖人
+  spawnWonderkids(ri(3,5));
   WORLD.userClub = WORLD.clubs.findIndex(c=>c.tier===userTier && c.id===userClubIdx);
   if(WORLD.userClub<0) WORLD.userClub=userClubIdx;
   buildSeason();
@@ -1891,12 +1893,52 @@ function aiTransferRound(){
         const b=pick(suitors);
         const offer=Math.round(askingPrice(tgt)*(0.82+rnd()*0.45)/1000)*1000;
         WORLD.offers=WORLD.offers||[];
-        if(!WORLD.offers.some(o=>o.pid===tgt.id))
-          WORLD.offers.push({pid:tgt.id, club:b.id, fee:offer, day:WORLD.day});
-        news(`${b.cn} 报价 ${tgt.cn}`,`${b.cn} 为 ${tgt.cn} 提交了 ${money(offer)} 的转会报价。请到「转会」页面处理，7 天内有效。`,"warn");
+        const dup=WORLD.offers.find(o=>o.pid===tgt.id&&o.club===b.id);
+        if(dup){
+          if(offer>dup.fee){
+            dup.fee=offer; dup.day=WORLD.day; dup.until=WORLD.day+14;
+            news(`${b.cn} 提高对 ${tgt.cn} 的报价`,`${b.cn} 将对 ${tgt.cn} 的报价提高到 ${money(offer)}。请到「转会」页面处理，14 天内有效。`,"warn");
+          }
+        }else if(WORLD.offers.length<8){
+          WORLD.offers.push({pid:tgt.id, club:b.id, fee:offer, day:WORLD.day, until:WORLD.day+14});
+          news(`${b.cn} 报价 ${tgt.cn}`,`${b.cn} 为 ${tgt.cn} 提交了 ${money(offer)} 的转会报价。请到「转会」页面处理，14 天内有效。`,"warn");
+        }
       }
     }
   }
+}
+
+// ---------- 超级妖人 ----------
+function makeWonderkid(clubId){
+  const pos=pick(POSITIONS);
+  const p=makePlayer(clamp(gauss(46,8),34,60), pos, ri(16,18), clubId);
+  p.pa=clamp(Math.max(p.pa, ri(176,200)), p.ca+50, 200);
+  p.wonderkid=true;
+  if(clubId>=0){
+    const c=C(clubId);
+    p.wage=Math.max(300,Math.round(calcWage(p,c.rep)*0.5/50)*50);
+    p.contract=WORLD.season+ri(2,4);
+    WORLD.players[p.id]=p; c.squad.push(p.id);
+  }else{
+    p.wage=calcWage(p,30); p.contract=WORLD.season;
+    WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
+  }
+  p.value=calcValue(p);
+  return p;
+}
+function spawnWonderkids(n){
+  const arr=[];
+  for(let i=0;i<n;i++){
+    const cands=WORLD.clubs.filter(x=>x.squad.length<34);
+    if(!cands.length) break;
+    arr.push(makeWonderkid(pick(cands).id));
+  }
+  if(arr.length){
+    const txt=arr.map(p=>`${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.clubId>=0?C(p.clubId).cn:"自由身"}）`).join("、");
+    news("球探圈热议：天才少年横空出世",
+      `球探圈盛传新一代妖人已崭露头角：${txt}。这类球员成长上限极高，尽早加入球探名单摸清潜力，抢在豪门之前下手。`,"good");
+  }
+  return arr;
 }
 
 // ---------- 青训 ----------
@@ -1918,6 +1960,7 @@ function youthIntake(){
       news("青年球员入队",`本赛季青训营送来 ${n} 名年轻球员。青训主管认为 ${best.cn}（${POS_CN[best.pos]}，${best.age}岁）最具潜力。`,"good");
     }
   });
+  spawnWonderkids(ri(2,4));
 }
 
 // ---------- 赛季结算 ----------
@@ -2104,8 +2147,8 @@ function processDayEnd(day){
   const dt=dateOf(day);
   if(dt.getDay()===1) weeklyTick();
   if(dt.getMonth()===2 && dt.getDate()===20 && !WORLD.youthDone){ WORLD.youthDone=true; youthIntake(); }
-  // 报价过期
-  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>WORLD.day-o.day<7);
+  // 报价过期（到期前始终可处理，不会被新报价顶掉）
+  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>((o.until!=null?o.until:o.day+7))>WORLD.day);
 }
 
 // 主「继续」入口，返回状态
@@ -2666,19 +2709,21 @@ function vTransfer(v){
   const offers=WORLD.offers||[];
   if(offers.length){
     const o=el("div","card"); o.innerHTML="<h3>收到的报价</h3>";
-    offers.forEach((of,idx)=>{
+    offers.forEach(of=>{
       const p=P(of.pid); if(!p) return;
+      const left=Math.max(0,(of.until!=null?of.until:of.day+7)-WORLD.day);
       const d=el("div"); d.style.cssText="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #1d242e";
       d.innerHTML=`${crestHTML(C(of.club))}<b>${esc(C(of.club).cn)}</b>
         <span class="hint">报价</span><b>${esc(p.cn)}</b>
         <span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>
         <span style="flex:1"></span>
         <b style="color:var(--acc)">${money(of.fee)}</b>
-        <span class="hint">（身价 ${money(p.value)}）</span>`;
+        <span class="hint">（身价 ${money(p.value)} · ${left} 天后到期）</span>`;
       const acc=el("button","sm pri","接受"); acc.onclick=()=>{
         transferPlayer(of.pid, of.club, of.fee, wageDemand(p,C(of.club)), ri(2,5));
-        WORLD.offers.splice(idx,1); toast(`${p.cn} 以 ${money(of.fee)} 转会至 ${C(of.club).cn}`); render(); };
-      const rej=el("button","sm","拒绝"); rej.onclick=()=>{ WORLD.offers.splice(idx,1); render(); };
+        WORLD.offers=WORLD.offers.filter(o=>o.pid!==of.pid);
+        toast(`${p.cn} 以 ${money(of.fee)} 转会至 ${C(of.club).cn}`); render(); };
+      const rej=el("button","sm","拒绝"); rej.onclick=()=>{ WORLD.offers=WORLD.offers.filter(o=>o!==of); render(); };
       d.appendChild(acc); d.appendChild(rej);
       o.appendChild(d);
     });
@@ -3583,7 +3628,8 @@ function vHelp(v){
       <div style="line-height:1.85">转会窗在 <b>8 月</b>与 <b>1 月</b>开启。<br>
       • 对手球员的属性默认不可见，加入<b>球探名单</b>后情报逐日积累，45% 可见属性、95% 可见真实潜力<br>
       • 报价需同时满足要价、球员薪资要求与俱乐部声望；低于要价 93% 会被直接拒绝<br>
-      • 其他球队也会向你报价，在转会页面处理；把球员<b>挂牌</b>可以吸引更多报价</div></div>
+      • 其他球队也会向你报价，14 天内有效、可同时收多份，在转会页面处理；把球员<b>挂牌</b>可以吸引更多报价<br>
+      • 市场上不时会出现潜力逆天的<b>超级妖人</b>——留意新闻里的天才少年传闻，抢先下手</div></div>
     <div class="card"><h3>经营与董事会</h3>
       <div style="line-height:1.85">收入来自门票、商业赞助与联赛分成；支出主要是周薪和转会费。
       董事会每周根据你与期望排名的差距调整信心，赛季末若长期远低于期望会被解雇。
