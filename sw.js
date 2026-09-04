@@ -1,6 +1,6 @@
 /* 足球经理 · Service Worker
    策略：网络优先，失败回落缓存。保证联网时永远拿到最新版本，断网时仍可开局。*/
-const VERSION = "fmweb-v9";
+const VERSION = "fmweb-v10";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {

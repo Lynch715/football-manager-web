@@ -242,19 +242,22 @@ img.crest{display:inline-block}
     display:flex;flex-wrap:wrap;align-items:stretch;
     overflow:hidden;overflow-anchor:none;
     border-right:none;border-top:1px solid var(--line);
-    padding:0 var(--sar) var(--sab) var(--sal);
+    background:linear-gradient(180deg,#18202b,#121821);
+    /* 安全区只留一小截，别整条空着 */
+    padding:1px var(--sar) max(calc(var(--sab) - 14px), 3px) var(--sal);
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
-  .nav{position:relative;flex:1 1 10%;flex-direction:column;gap:1px;
-    margin:3px 1px 1px;padding:4px 0 3px;border-radius:9px;
+  .nav{position:relative;flex:1 1 10%;flex-direction:column;gap:0;
+    margin:2px 1px;padding:3px 0 2px;border-radius:8px;
     border-left:none;border-top:none;line-height:1.1;
     font-size:9px;white-space:nowrap;min-width:0;justify-content:center;align-items:center;
     overflow:hidden}
   .nav:hover{background:none;color:var(--dim)}
-  .nav.on{background:rgba(0,212,126,.12);color:var(--acc);font-weight:600}
-  .nav i{width:auto;font-size:16px;line-height:1.25;opacity:1}
-  .nav .badge{position:absolute;top:1px;right:50%;transform:translate(16px,0);margin:0}
+  .nav.on{background:rgba(0,212,126,.13);color:var(--acc);font-weight:600}
+  .nav i{width:auto;font-size:15px;line-height:1.3;filter:grayscale(1);opacity:.6}
+  .nav.on i{filter:none;opacity:1}
+  .nav .badge{position:absolute;top:0;right:50%;transform:translate(15px,0);margin:0}
   /* 底栏已经吃掉安全区，视图底部不要再补一次，否则留白翻倍 */
   #view{padding:11px calc(11px + var(--sar)) 10px calc(11px + var(--sal))}
 
