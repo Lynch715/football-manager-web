@@ -237,7 +237,7 @@ img.crest{display:inline-block}
   #view{order:1}
   #side{order:2;
     width:100%;
-    height:calc(54px + var(--sab));flex:0 0 calc(54px + var(--sab));
+    height:calc(46px + var(--sab));flex:0 0 calc(46px + var(--sab));
     display:flex;align-items:stretch;
     overflow-x:auto;overflow-y:hidden;overflow-anchor:none;
     border-right:none;border-top:1px solid var(--line);
@@ -245,13 +245,14 @@ img.crest{display:inline-block}
     scrollbar-width:none}
   #side::-webkit-scrollbar{display:none}
   .nav-grp{display:none}
-  .nav{position:relative;flex:0 0 auto;flex-direction:column;gap:1px;padding:6px 12px;
-    border-left:none;border-top:3px solid transparent;line-height:1.25;
-    font-size:10px;white-space:nowrap;min-width:56px;justify-content:center;align-items:center}
+  .nav{position:relative;flex:0 0 auto;flex-direction:column;gap:0;padding:3px 11px;
+    border-left:none;border-top:3px solid transparent;line-height:1.15;
+    font-size:9.5px;white-space:nowrap;min-width:52px;justify-content:center;align-items:center}
   .nav.on{border-left-color:transparent;border-top-color:var(--acc)}
-  .nav i{width:auto;font-size:17px}
-  .nav .badge{position:absolute;transform:translate(14px,-4px)}
-  #view{padding:11px calc(11px + var(--sar)) 24px calc(11px + var(--sal))}
+  .nav i{width:auto;font-size:15px;line-height:1.1}
+  .nav .badge{position:absolute;transform:translate(13px,-3px)}
+  /* 底栏已经吃掉安全区，视图底部不要再补一次，否则留白翻倍 */
+  #view{padding:11px calc(11px + var(--sar)) 10px calc(11px + var(--sal))}
 
   /* 单栏堆叠 */
   .grid2,.grid3{grid-template-columns:1fr}
@@ -295,7 +296,7 @@ img.crest{display:inline-block}
   .grid4{grid-template-columns:1fr 1fr}
   .s-next{display:none}
   #tb-club{max-width:96px;overflow:hidden}
-  .nav{min-width:52px;padding:7px 9px 6px}
+  .nav{min-width:48px;padding:3px 8px}
 }
 
 /* 横屏手机：保留左侧图标导航，纵向空间优先 */
@@ -3294,6 +3295,7 @@ function completeMatch(){
   const M=CURMATCH;
   const res=finishUserMatch();
   VIEW="home";
+  AUTOSAVE_DAY=-99; autoSave();      // 每场比赛后落盘，「继续游戏」才有意义
   showPostMatch(M, res==="season");
 }
 function showPostMatch(M, seasonEnded){
@@ -3583,12 +3585,83 @@ function vHelp(v){
     <div class="hint">进度不会自动保存。请在「存档」页手动保存到浏览器，或导出 .json 文件长期保留。</div></div>`;
 }
 
+/* ---------- 启动菜单 ---------- */
+const SCR_PAD="padding:calc(20px + var(--sat)) calc(20px + var(--sar)) calc(20px + var(--sab)) calc(20px + var(--sal))";
+let AUTOSAVE_DAY=-99;
+
+function saveMeta(){
+  try{
+    const raw=localStorage.getItem(SAVEKEY); if(!raw) return null;
+    const m=JSON.parse(localStorage.getItem(SAVEKEY+"_meta")||"{}");
+    return {club:m.club||"未知俱乐部", season:m.season, day:m.day||0, mb:(raw.length/1048576).toFixed(2)};
+  }catch(e){ return null; }
+}
+function autoSave(){
+  try{
+    if(!WORLD||!WORLD.clubs) return;
+    if(WORLD.day-AUTOSAVE_DAY < 5) return;
+    AUTOSAVE_DAY=WORLD.day;
+    localStorage.setItem(SAVEKEY,JSON.stringify(WORLD));
+    localStorage.setItem(SAVEKEY+"_meta",JSON.stringify({club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1}));
+  }catch(e){}
+}
+function enterGame(){
+  document.getElementById("loadscr").style.display="none";
+  document.getElementById("app").style.display="flex";
+  render();
+}
+function continueGame(){
+  try{
+    const s=localStorage.getItem(SAVEKEY);
+    if(!s){ toast("没有找到存档","bad"); newGameScreen(); return; }
+    WORLD=JSON.parse(s); CURMATCH=null; VIEW="home";
+    AUTOSAVE_DAY=WORLD.day;
+    enterGame(); toast("已载入存档");
+  }catch(e){ toast("存档已损坏，无法读取","bad"); }
+}
+function startMenu(){
+  const m=saveMeta();
+  if(!m) return newGameScreen();          // 没有存档 → 直接进选队
+  document.getElementById("app").style.display="none";
+  const ls=document.getElementById("loadscr");
+  ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;"+
+    "display:flex;align-items:center;justify-content:center;"+SCR_PAD;
+  ls.innerHTML="";
+  const box=el("div","card");
+  box.style.cssText="max-width:380px;width:100%;text-align:center;padding:26px 22px";
+  box.innerHTML=`<h1 style="font-size:30px;letter-spacing:5px;color:var(--acc);margin-bottom:2px">足球经理</h1>
+    <div class="hint" style="margin-bottom:18px">FOOTBALL MANAGER · WEB</div>
+    <div style="background:var(--bg3);border:1px solid var(--line);border-radius:8px;padding:11px;text-align:left">
+      <div class="hint">上次进度</div>
+      <div style="font-weight:700;font-size:15px;margin:2px 0">${esc(m.club)}</div>
+      <div class="hint">${m.season||"?"}/${m.season!=null?String(m.season+1).slice(2):"??"} 赛季 · 第 ${m.day} 天 · ${m.mb} MB</div>
+    </div><div class="hr"></div>`;
+  const mk=(cls,txt,fn)=>{ const b=el("button",cls,txt);
+    b.style.cssText="display:block;width:100%;margin-top:9px;padding:11px"; b.onclick=fn; return b; };
+  box.appendChild(mk("pri","▶ 继续游戏", continueGame));
+  box.appendChild(mk("","＋ 新开一局", ()=>{
+    if(confirm("开始新游戏会在保存时覆盖当前存档，确定继续？")) newGameScreen();
+  }));
+  const inp=el("input"); inp.type="file"; inp.accept=".json"; inp.style.display="none";
+  inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{ try{ WORLD=JSON.parse(r.result); CURMATCH=null; VIEW="home";
+        AUTOSAVE_DAY=WORLD.day; enterGame(); toast("存档已导入"); }
+      catch(err){ toast("文件无法解析","bad"); } };
+    r.readAsText(f); };
+  box.appendChild(mk("","📂 导入存档文件", ()=>inp.click()));
+  box.appendChild(inp);
+  ls.appendChild(box);
+}
+
 /* ---------- 新游戏 ---------- */
 function newGameScreen(){
   document.getElementById("app").style.display="none";
   const ls=document.getElementById("loadscr");
   ls.style.display="flex"; ls.innerHTML="";
-  ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;padding:26px;display:block";
+  // 顶部必须避开灵动岛/刘海，否则标题会被挖孔盖住
+  ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;display:block;"+
+    "padding:calc(20px + var(--sat)) calc(20px + var(--sar)) calc(20px + var(--sab)) calc(20px + var(--sal))";
   const box=el("div"); box.style.cssText="max-width:1080px;margin:0 auto";
   box.innerHTML=`<h1 style="font-size:32px;letter-spacing:5px;color:var(--acc);text-align:center;margin-bottom:4px">足球经理</h1>
     <div class="sub" style="text-align:center">选择一家俱乐部，开始你的执教生涯 · ${LEAGUE_SHORT.join(" / ")} 共 60 队</div>`;
@@ -3619,9 +3692,14 @@ function newGameScreen(){
   }
   paint();
   box.appendChild(tabs); box.appendChild(grid);
-  const ft=el("div","hint"); ft.style.cssText="text-align:center;margin:22px 0 40px";
+  const ft=el("div","hint"); ft.style.cssText="text-align:center;margin:22px 0 12px";
   ft.textContent="提示：声望越低的球队资金与球员越差，挑战越大。";
   box.appendChild(ft);
+  if(saveMeta()){                       // 有存档时留一个退路，别把人困在选队页
+    const back=el("div"); back.style.cssText="text-align:center;margin-bottom:36px";
+    const b=el("button","sm","← 返回，继续原来的存档"); b.onclick=()=>startMenu();
+    back.appendChild(b); box.appendChild(back);
+  }
   ls.appendChild(box);
 }
 function startGame(tier, idx){
@@ -3632,9 +3710,7 @@ function startGame(tier, idx){
   autoPickLineup(c);
   news("欢迎上任",`欢迎来到 ${c.cn}！董事会对你本赛季的期望是「${c.board.expect}」。祝你好运，教练。`,"good");
   news("赛季前瞻",`${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季即将开始，你可以在「战术」中调整阵型，在「转会」中补强阵容。`,"info");
-  document.getElementById("loadscr").style.display="none";
-  document.getElementById("app").style.display="flex";
-  VIEW="home"; render();
+  VIEW="home"; AUTOSAVE_DAY=WORLD.day; enterGame();
 }
 
 /* ---------- 赛季结束 ---------- */
@@ -3678,7 +3754,8 @@ function onContinue(){
   catch(err){ console.error(err); toast("推进失败："+(err&&err.message||err),"bad"); return; }
   finally{ BUSY=false; }   // 出错也要解锁，否则「继续」会永久失效
   if(r.t==="match"){ startUserMatch(r.fx); return; }
-  if(r.t==="season"){ render(); showSeasonEnd(); return; }
+  if(r.t==="season"){ AUTOSAVE_DAY=-99; autoSave(); render(); showSeasonEnd(); return; }
+  autoSave();
   render();
 }
 
@@ -3770,7 +3847,7 @@ window.addEventListener("DOMContentLoaded",()=>{
     if(e.key==="Enter" && !$("#modal").classList.contains("on")
        && (VIEW!=="match" || (CURMATCH && CURMATCH.done))) onContinue();
   });
-  setTimeout(()=>{ newGameScreen(); offlineHint(); },450);
+  setTimeout(()=>{ startMenu(); offlineHint(); },450);
 });
 
 /* ---------- 调试/测试桥接（顶层 let 绑定不会自动挂到 window） ---------- */
