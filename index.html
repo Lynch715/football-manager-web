@@ -138,6 +138,7 @@ label{font-size:11px;color:var(--dim);display:block;margin-bottom:3px}
 .t-b{background:#3d1618;color:#ff8080}
 .t-i{background:#12293d;color:var(--info)}
 .t-n{background:#252d38;color:var(--dim)}
+.t-eu{background:#2a1f45;color:#c9a6ff}
 
 .bar{height:5px;background:#252d38;border-radius:3px;overflow:hidden;min-width:44px}
 .bar>i{display:block;height:100%;border-radius:3px}
@@ -169,7 +170,8 @@ img.crest{display:inline-block}
 #modal-hd .x{margin-left:auto;cursor:pointer;color:var(--dim);font-size:19px;line-height:1;padding:0 4px}
 #modal-hd .x:hover{color:var(--txt)}
 #modal-bd{padding:16px;overflow-y:auto}
-#modal-ft{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+#modal-ft{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+#modal-ft button{white-space:nowrap}
 
 /* ---------- 提示条 ---------- */
 #toast{position:fixed;bottom:calc(20px + var(--sab));left:50%;transform:translateX(-50%);z-index:200;
@@ -196,7 +198,8 @@ img.crest{display:inline-block}
 .ev{padding:3px 0;border-bottom:1px solid #1a2029;display:flex;gap:9px;animation:evin .2s}
 @keyframes evin{from{opacity:0;transform:translateX(-6px)}}
 .ev .m{color:var(--dim);width:34px;flex:0 0 34px;font-variant-numeric:tabular-nums;font-size:11px}
-.ev.goal{color:var(--acc);font-weight:700;background:#0d2a1c;margin:2px -12px;padding:5px 12px}
+.ev.goal{color:var(--acc);font-weight:700;background:#0d2a1c;margin:2px 0;padding:5px 8px;border-radius:4px}
+#mfeed .ev.goal{margin:2px -12px;padding:5px 12px;border-radius:0}
 .ev.chance{color:var(--warn)}
 .ev.card{color:#ffd24a}
 .ev.hurt{color:var(--bad)}
@@ -304,6 +307,20 @@ img.crest{display:inline-block}
   .s-next{display:none}
   #tb-club{max-width:96px;overflow:hidden}
   .nav{font-size:9px}
+  /* 表格：隐藏次要列，让积分 / 能力等关键列不用横向滚动就能看到 */
+  .mh,.en-sub,.pos2{display:none !important}
+  th,td{padding:6px 5px}
+  .tag{padding:1px 5px}
+  /* 提示气泡移到底部导航之上，避免遮住导航 */
+  #toast{bottom:calc(84px + var(--sab))}
+  /* 弹窗底部按钮：均分两列，文字不折行 */
+  #modal-ft{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  #modal-ft button{width:100%;padding:10px 6px;font-size:13px}
+  #modal-ft button:only-child{grid-column:1 / -1}
+  /* 页面顶部的分段按钮组：可横向滚动而不换行挤压 */
+  .segbar{display:flex;flex-wrap:nowrap !important;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+  .segbar::-webkit-scrollbar{display:none}
+  .segbar button{flex:0 0 auto}
 }
 
 /* 横屏手机：保留左侧图标导航，纵向空间优先 */
@@ -365,76 +382,323 @@ img.crest{display:inline-block}
    ========================================================= */
 'use strict';
 
-// [英文名, 中文名, 简称, 主色, 副色, 声望, 球场容量, 球场名]
-const CLUB_DATA = [
- // ---------- 第一级：英超 ----------
- [["Manchester City","曼彻斯特城","曼城","#6CABDD","#1C2C5B",94,53400,"伊蒂哈德球场"],
-  ["Liverpool","利物浦","利物浦","#C8102E","#F6EB61",93,61000,"安菲尔德"],
-  ["Arsenal","阿森纳","阿森纳","#EF0107","#FFFFFF",92,60700,"酋长球场"],
-  ["Manchester United","曼彻斯特联","曼联","#DA020E","#FBE122",91,74300,"老特拉福德"],
-  ["Chelsea","切尔西","切尔西",'#034694',"#FFFFFF",89,40300,"斯坦福桥"],
-  ["Tottenham Hotspur","托特纳姆热刺","热刺","#132257","#FFFFFF",86,62800,"热刺球场"],
-  ["Newcastle United","纽卡斯尔联","纽卡","#241F20","#FFFFFF",83,52300,"圣詹姆斯公园"],
-  ["Aston Villa","阿斯顿维拉","维拉","#95BFE5","#670E36",80,42700,"维拉公园"],
-  ["West Ham United","西汉姆联","西汉姆","#7A263A","#1BB1E7",76,62500,"伦敦碗"],
-  ["Brighton","布莱顿","布莱顿","#0057B8","#FFCD00",73,31800,"美国运通球场"],
-  ["Everton","埃弗顿","埃弗顿","#003399","#FFFFFF",72,52800,"布拉莫尔码头"],
-  ["Wolverhampton","伍尔弗汉普顿","狼队","#FDB913","#231F20",70,32100,"莫利纽克斯"],
-  ["Crystal Palace","水晶宫","水晶宫","#1B458F","#C4122E",69,25500,"塞尔赫斯特公园"],
-  ["Fulham","富勒姆","富勒姆","#FFFFFF","#000000",68,29600,"克拉文农场"],
-  ["Brentford","布伦特福德","布伦特","#E30613","#FFFFFF",67,17300,"社区球场"],
-  ["Nottingham Forest","诺丁汉森林","森林","#DD0000","#FFFFFF",66,30400,"城市球场"],
-  ["Bournemouth","伯恩茅斯","茅斯","#DA291C","#000000",64,11300,"迪恩考特"],
-  ["Leicester City","莱斯特城","莱斯特","#003090","#FDBE11",63,32300,"国王power球场"],
-  ["Southampton","南安普顿","南安","#D71920","#130C0E",60,32400,"圣玛丽球场"],
-  ["Ipswich Town","伊普斯维奇","伊普斯","#3A64A3","#FFFFFF",56,30300,"波特曼路"]],
- // ---------- 第二级：英冠 ----------
- [["Leeds United","利兹联","利兹","#FFFFFF","#1D428A",62,37600,"埃兰路"],
-  ["Sunderland","桑德兰","桑德兰","#EB172B","#FFFFFF",58,49000,"光明球场"],
-  ["Burnley","伯恩利","伯恩利","#6C1D45","#99D6EA",56,21900,"特夫摩尔"],
-  ["Sheffield United","谢菲尔德联","谢联","#EE2737","#FFFFFF",55,32100,"布拉莫尔巷"],
-  ["West Bromwich Albion","西布罗姆维奇","西布朗","#122F67","#FFFFFF",54,26800,"山楂球场"],
-  ["Norwich City","诺维奇城","诺维奇","#FFF200","#00A650",53,27200,"卡罗路"],
-  ["Middlesbrough","米德尔斯堡","米堡","#E21C38","#FFFFFF",52,34000,"河畔球场"],
-  ["Stoke City","斯托克城","斯托克","#E03A3E","#FFFFFF",50,30100,"不列颠球场"],
-  ["Sheffield Wednesday","谢菲尔德星期三","谢周三","#0066B3","#FFFFFF",49,39700,"希尔斯堡"],
-  ["Coventry City","考文垂城","考文垂","#78D0F3","#FFFFFF",48,32600,"里科球场"],
-  ["Derby County","德比郡","德比","#FFFFFF","#000000",47,33500,"骄傲公园"],
-  ["Watford","沃特福德","沃特福","#FBEE23","#ED2127",47,22200,"维卡拉治路"],
-  ["Cardiff City","卡迪夫城","卡迪夫","#0070B5","#FFFFFF",46,33300,"卡迪夫城球场"],
-  ["Swansea City","斯旺西城","斯旺西","#FFFFFF","#121212",45,21100,"自由球场"],
-  ["Hull City","赫尔城","赫尔城","#F5A12D","#000000",45,25400,"KC球场"],
-  ["Bristol City","布里斯托城","布城","#E31B23","#FFFFFF",44,27000,"阿什顿门"],
-  ["Blackburn Rovers","布莱克本","布莱本","#009EE0","#FFFFFF",44,31400,"埃伍德公园"],
-  ["Preston North End","普雷斯顿","普雷斯","#FFFFFF","#004A9E",42,23400,"深谷球场"],
-  ["Millwall","米尔沃尔","米尔","#001D5C","#FFFFFF",41,20100,"新丹恩球场"],
-  ["Portsmouth","朴茨茅斯","朴茨","#001489","#FFFFFF",40,20900,"弗拉顿公园"]],
- // ---------- 第三级：英甲 ----------
- [["Birmingham City","伯明翰城","伯明翰","#0000FF","#FFFFFF",42,29400,"圣安德鲁斯"],
-  ["Wrexham","雷克瑟姆","雷克瑟","#DD0000","#FFFFFF",38,13500,"跑马场球场"],
-  ["Bolton Wanderers","博尔顿","博尔顿","#FFFFFF","#0B1C48",37,28700,"里波克球场"],
-  ["Huddersfield Town","哈德斯菲尔德","哈镇","#0E63AD","#FFFFFF",36,24100,"约翰史密斯球场"],
-  ["Luton Town","卢顿","卢顿","#F78F1E","#002D62",36,11500,"凯尼沃斯路"],
-  ["Charlton Athletic","查尔顿","查尔顿","#E4002B","#FFFFFF",35,27100,"山谷球场"],
-  ["Reading","雷丁","雷丁","#004494","#FFFFFF",34,24200,"马德伊斯基球场"],
-  ["Barnsley","巴恩斯利","巴恩","#E31B23","#FFFFFF",33,23300,"橡树谷"],
-  ["Wigan Athletic","维冈竞技","维冈","#1D59AF","#FFFFFF",33,25100,"DW球场"],
-  ["Blackpool","布莱克浦","布浦","#F68712","#FFFFFF",32,17300,"血池球场"],
-  ["Rotherham United","罗瑟勒姆","罗瑟","#DD1F26","#FFFFFF",31,12000,"新约克郡球场"],
-  ["Peterborough United","彼得堡联","彼得堡","#0053A0","#FFFFFF",30,15300,"伦敦路"],
-  ["Bristol Rovers","布里斯托流浪","流浪","#004B87","#FFFFFF",29,12300,"纪念球场"],
-  ["Lincoln City","林肯城","林肯","#DD0000","#FFFFFF",28,10100,"银十字球场"],
-  ["Northampton Town","北安普顿","北安","#902B2B","#FFFFFF",27,7800,"塞克斯顿球场"],
-  ["Exeter City","埃克塞特","埃克塞","#DD0000","#FFFFFF",26,8500,"圣詹姆斯公园(E)"],
-  ["Burton Albion","伯顿","伯顿","#FFDD00","#000000",25,6900,"皮雷利球场"],
-  ["Shrewsbury Town","什鲁斯伯里","什鲁","#0000B4","#FFFFFF",25,9900,"新草地球场"],
-  ["Stevenage","斯蒂夫尼奇","斯蒂夫","#EE2222","#FFFFFF",24,7400,"拉姆花园"],
-  ["Leyton Orient","莱顿东方","东方","#DD0000","#FFFFFF",23,9200,"布里斯班路"]]
+// [英文名, 中文名, 简称, 主色, 副色, 声望, 球场容量, 球场名, 队徽缩写, 队徽外形, 队徽花纹]
+// 队徽缩写按足球界通行写法，外形/花纹为按传统队色自绘的原创图形，与真实商标无关。
+
+// ---------- 国家 / 联赛结构 ----------
+const NATIONS=[
+ {code:"ENG",name:"英格兰",cup:"足总杯",rg:"eng",cl:4,el:3,
+  tiers:[{name:"英格兰超级联赛",short:"英超",price:42,prize:[172e6,104e6]},
+         {name:"英格兰冠军联赛",short:"英冠",price:27,prize:[13e6,5.5e6]},
+         {name:"英格兰甲级联赛",short:"英甲",price:19,prize:[2.6e6,1.1e6]}]},
+ {code:"ESP",name:"西班牙",cup:"国王杯",rg:"esp",cl:4,el:3,
+  tiers:[{name:"西班牙甲级联赛",short:"西甲",price:38,prize:[150e6,48e6]},
+         {name:"西班牙乙级联赛",short:"西乙",price:18,prize:[8e6,3.2e6]}]},
+ {code:"ITA",name:"意大利",cup:"意大利杯",rg:"ita",cl:4,el:3,
+  tiers:[{name:"意大利甲级联赛",short:"意甲",price:35,prize:[110e6,36e6]},
+         {name:"意大利乙级联赛",short:"意乙",price:16,prize:[6e6,2.4e6]}]},
+ {code:"GER",name:"德国",cup:"德国杯",rg:"ger",cl:4,el:3,
+  tiers:[{name:"德国甲级联赛",short:"德甲",price:30,prize:[100e6,38e6]},
+         {name:"德国乙级联赛",short:"德乙",price:17,prize:[12e6,5e6]}]},
+ {code:"FRA",name:"法国",cup:"法国杯",rg:"fra",cl:3,el:3,
+  tiers:[{name:"法国甲级联赛",short:"法甲",price:30,prize:[62e6,18e6]},
+         {name:"法国乙级联赛",short:"法乙",price:15,prize:[7e6,2.8e6]}]}
+];
+const EURO_NATION=NATIONS.length;   // 「欧洲其他」伪国家编号
+const EURO_COMPS={
+  CL:{code:"CL",name:"欧洲冠军联赛",short:"欧冠",others:13,
+      prize:{enter:15e6,win:2.1e6,draw:0.7e6,r16:9.6e6,qf:10.6e6,sf:12.5e6,fin:15.5e6,champ:4.5e6}},
+  EL:{code:"EL",name:"欧罗巴联赛",short:"欧联",others:12,
+      prize:{enter:3.6e6,win:0.6e6,draw:0.2e6,r16:1.2e6,qf:1.8e6,sf:2.8e6,fin:4.6e6,champ:4e6}}
+};
+
+const CLUB_DATA_ENG = [
+ // 英超
+ [
+ ["Manchester City","曼彻斯特城","曼城","#6CABDD","#1C2C5B",94,53400,"伊蒂哈德球场","MCI","round","solid"],
+ ["Liverpool","利物浦","利物浦","#C8102E","#F6EB61",93,61000,"安菲尔德","LIV","shield","solid"],
+ ["Arsenal","阿森纳","阿森纳","#EF0107","#FFFFFF",92,60700,"酋长球场","ARS","crest","solid"],
+ ["Manchester United","曼彻斯特联","曼联","#DA020E","#FBE122",91,74300,"老特拉福德","MUN","round","solid"],
+ ["Chelsea","切尔西","切尔西","#034694","#FFFFFF",89,40300,"斯坦福桥","CHE","round","solid"],
+ ["Tottenham Hotspur","托特纳姆热刺","热刺","#132257","#FFFFFF",86,62800,"热刺球场","TOT","shield","solid"],
+ ["Newcastle United","纽卡斯尔联","纽卡","#241F20","#FFFFFF",83,52300,"圣詹姆斯公园","NEW","shield","vstripe"],
+ ["Aston Villa","阿斯顿维拉","维拉","#95BFE5","#670E36",80,42700,"维拉公园","AVL","shield","halves"],
+ ["West Ham United","西汉姆联","西汉姆","#7A263A","#1BB1E7",76,62500,"伦敦碗","WHU","crest","solid"],
+ ["Brighton","布莱顿","布莱顿","#0057B8","#FFCD00",73,31800,"美国运通球场","BHA","shield","vstripe"],
+ ["Everton","埃弗顿","埃弗顿","#003399","#FFFFFF",72,52800,"布拉莫尔码头","EVE","shield","solid"],
+ ["Wolverhampton","伍尔弗汉普顿","狼队","#FDB913","#231F20",70,32100,"莫利纽克斯","WOL","crest","solid"],
+ ["Crystal Palace","水晶宫","水晶宫","#1B458F","#C4122E",69,25500,"塞尔赫斯特公园","CRY","shield","sash"],
+ ["Fulham","富勒姆","富勒姆","#FFFFFF","#000000",68,29600,"克拉文农场","FUL","round","solid"],
+ ["Brentford","布伦特福德","布伦特","#E30613","#FFFFFF",67,17300,"社区球场","BRE","shield","vstripe"],
+ ["Nottingham Forest","诺丁汉森林","森林","#DD0000","#FFFFFF",66,30400,"城市球场","NFO","round","solid"],
+ ["Bournemouth","伯恩茅斯","茅斯","#DA291C","#000000",64,11300,"迪恩考特","BOU","crest","vstripe"],
+ ["Leicester City","莱斯特城","莱斯特","#003090","#FDBE11",63,32300,"国王power球场","LEI","round","solid"],
+ ["Southampton","南安普顿","南安","#D71920","#130C0E",60,32400,"圣玛丽球场","SOU","shield","vstripe"],
+ ["Ipswich Town","伊普斯维奇","伊普斯","#3A64A3","#FFFFFF",56,30300,"波特曼路","IPS","round","solid"]
+ ],
+ // 英冠
+ [
+ ["Leeds United","利兹联","利兹","#FFFFFF","#1D428A",62,37600,"埃兰路","LEE","round","solid"],
+ ["Sunderland","桑德兰","桑德兰","#EB172B","#FFFFFF",58,49000,"光明球场","SUN","shield","vstripe"],
+ ["Burnley","伯恩利","伯恩利","#6C1D45","#99D6EA",56,21900,"特夫摩尔","BUR","crest","solid"],
+ ["Sheffield United","谢菲尔德联","谢联","#EE2737","#FFFFFF",55,32100,"布拉莫尔巷","SHU","shield","vstripe"],
+ ["West Bromwich Albion","西布罗姆维奇","西布朗","#122F67","#FFFFFF",54,26800,"山楂球场","WBA","shield","vstripe"],
+ ["Norwich City","诺维奇城","诺维奇","#FFF200","#00A650",53,27200,"卡罗路","NOR","round","solid"],
+ ["Middlesbrough","米德尔斯堡","米堡","#E21C38","#FFFFFF",52,34000,"河畔球场","MID","crest","solid"],
+ ["Stoke City","斯托克城","斯托克","#E03A3E","#FFFFFF",50,30100,"不列颠球场","STK","shield","vstripe"],
+ ["Sheffield Wednesday","谢菲尔德星期三","谢周三","#0066B3","#FFFFFF",49,39700,"希尔斯堡","SHW","shield","vstripe"],
+ ["Coventry City","考文垂城","考文垂","#78D0F3","#FFFFFF",48,32600,"里科球场","COV","round","solid"],
+ ["Derby County","德比郡","德比","#FFFFFF","#000000",47,33500,"骄傲公园","DER","shield","solid"],
+ ["Watford","沃特福德","沃特福","#FBEE23","#ED2127",47,22200,"维卡拉治路","WAT","crest","solid"],
+ ["Cardiff City","卡迪夫城","卡迪夫","#0070B5","#FFFFFF",46,33300,"卡迪夫城球场","CAR","shield","solid"],
+ ["Swansea City","斯旺西城","斯旺西","#FFFFFF","#121212",45,21100,"自由球场","SWA","round","solid"],
+ ["Hull City","赫尔城","赫尔城","#F5A12D","#000000",45,25400,"KC球场","HUL","crest","vstripe"],
+ ["Bristol City","布里斯托城","布城","#E31B23","#FFFFFF",44,27000,"阿什顿门","BRC","round","solid"],
+ ["Blackburn Rovers","布莱克本","布莱本","#009EE0","#FFFFFF",44,31400,"埃伍德公园","BLB","shield","halves"],
+ ["Preston North End","普雷斯顿","普雷斯","#FFFFFF","#004A9E",42,23400,"深谷球场","PNE","crest","solid"],
+ ["Millwall","米尔沃尔","米尔","#001D5C","#FFFFFF",41,20100,"新丹恩球场","MIL","shield","chevron"],
+ ["Portsmouth","朴茨茅斯","朴茨","#001489","#FFFFFF",40,20900,"弗拉顿公园","POR","shield","solid"]
+ ],
+ // 英甲
+ [
+ ["Birmingham City","伯明翰城","伯明翰","#0000FF","#FFFFFF",42,29400,"圣安德鲁斯","BIR","round","solid"],
+ ["Wrexham","雷克瑟姆","雷克瑟","#DD0000","#FFFFFF",38,13500,"跑马场球场","WRE","shield","solid"],
+ ["Bolton Wanderers","博尔顿","博尔顿","#FFFFFF","#0B1C48",37,28700,"里波克球场","BOL","crest","solid"],
+ ["Huddersfield Town","哈德斯菲尔德","哈镇","#0E63AD","#FFFFFF",36,24100,"约翰史密斯球场","HUD","shield","vstripe"],
+ ["Luton Town","卢顿","卢顿","#F78F1E","#002D62",36,11500,"凯尼沃斯路","LUT","round","solid"],
+ ["Charlton Athletic","查尔顿","查尔顿","#E4002B","#FFFFFF",35,27100,"山谷球场","CHA","shield","solid"],
+ ["Reading","雷丁","雷丁","#004494","#FFFFFF",34,24200,"马德伊斯基球场","REA","crest","hoops"],
+ ["Barnsley","巴恩斯利","巴恩","#E31B23","#FFFFFF",33,23300,"橡树谷","BAR","round","solid"],
+ ["Wigan Athletic","维冈竞技","维冈","#1D59AF","#FFFFFF",33,25100,"DW球场","WIG","shield","solid"],
+ ["Blackpool","布莱克浦","布浦","#F68712","#FFFFFF",32,17300,"血池球场","BLP","round","solid"],
+ ["Rotherham United","罗瑟勒姆","罗瑟","#DD1F26","#FFFFFF",31,12000,"新约克郡球场","ROT","crest","solid"],
+ ["Peterborough United","彼得堡联","彼得堡","#0053A0","#FFFFFF",30,15300,"伦敦路","PET","shield","solid"],
+ ["Bristol Rovers","布里斯托流浪","流浪","#004B87","#FFFFFF",29,12300,"纪念球场","BRR","shield","quarters"],
+ ["Lincoln City","林肯城","林肯","#DD0000","#FFFFFF",28,10100,"银十字球场","LIN","crest","vstripe"],
+ ["Northampton Town","北安普顿","北安","#902B2B","#FFFFFF",27,7800,"塞克斯顿球场","NTH","round","solid"],
+ ["Exeter City","埃克塞特","埃克塞","#DD0000","#FFFFFF",26,8500,"圣詹姆斯公园(E)","EXE","shield","vstripe"],
+ ["Burton Albion","伯顿","伯顿","#FFDD00","#000000",25,6900,"皮雷利球场","BUT","crest","solid"],
+ ["Shrewsbury Town","什鲁斯伯里","什鲁","#0000B4","#FFFFFF",25,9900,"新草地球场","SHR","shield","solid"],
+ ["Stevenage","斯蒂夫尼奇","斯蒂夫","#EE2222","#FFFFFF",24,7400,"拉姆花园","STE","round","solid"],
+ ["Leyton Orient","莱顿东方","东方","#DD0000","#FFFFFF",23,9200,"布里斯班路","LEY","crest","sash"]
+ ]
 ];
 
-const LEAGUE_NAMES = ["英格兰超级联赛","英格兰冠军联赛","英格兰甲级联赛"];
-const LEAGUE_SHORT = ["英超","英冠","英甲"];
-const CUP_NAME = "足总杯";
+// ---------- 西班牙 ----------
+const CLUB_DATA_ESP = [
+ // 西甲
+ [["Real Madrid","皇家马德里","皇马","#FFFFFF","#FEBE10",95,81000,"伯纳乌球场","RMA","round","solid"],
+  ["Barcelona","巴塞罗那","巴萨","#A50044","#004D98",92,99300,"诺坎普","BAR","shield","vstripe"],
+  ["Atletico Madrid","马德里竞技","马竞","#CB3524","#FFFFFF",87,70400,"大都会球场","ATM","shield","vstripe"],
+  ["Athletic Bilbao","毕尔巴鄂竞技","毕尔巴鄂","#EE2523","#FFFFFF",77,53300,"圣马梅斯","ATH","shield","vstripe"],
+  ["Villarreal","比利亚雷亚尔","黄潜","#FFE667","#005187",76,23000,"陶瓷球场","VIL","round","solid"],
+  ["Real Sociedad","皇家社会","皇社","#0067B1","#FFFFFF",75,39500,"阿诺埃塔","RSO","shield","vstripe"],
+  ["Real Betis","皇家贝蒂斯","贝蒂斯","#00954C","#FFFFFF",74,60700,"贝尼托比利亚马林","BET","shield","vstripe"],
+  ["Sevilla","塞维利亚","塞维利亚","#FFFFFF","#D4021D",72,43900,"桑切斯皮斯胡安","SEV","round","solid"],
+  ["Girona","赫罗纳","赫罗纳","#CD2534","#FFFFFF",70,14600,"蒙蒂利维","GIR","shield","vstripe"],
+  ["Valencia","瓦伦西亚","瓦伦","#FFFFFF","#F18E00",69,49400,"梅斯塔利亚","VAL","crest","solid"],
+  ["Osasuna","奥萨苏纳","奥萨苏纳","#D91A21","#0A346F",66,23500,"萨达尔球场","OSA","shield","solid"],
+  ["Celta Vigo","塞尔塔","塞尔塔","#8AC3EE","#FFFFFF",65,29000,"巴莱多斯","CEL","round","solid"],
+  ["Rayo Vallecano","巴列卡诺","巴列卡诺","#FFFFFF","#E53027",63,14700,"巴列卡斯球场","RAY","shield","sash"],
+  ["Mallorca","马洛卡","马洛卡","#E20613","#000000",63,23100,"马洛卡球场","MLL","shield","solid"],
+  ["Getafe","赫塔费","赫塔费","#005999","#FFFFFF",61,17400,"阿方索佩雷斯","GET","round","solid"],
+  ["Espanyol","西班牙人","西班牙人","#007FC8","#FFFFFF",60,40000,"RCDE球场","ESP","shield","vstripe"],
+  ["Alaves","阿拉维斯","阿拉维斯","#0761AF","#FFFFFF",58,19800,"门迪索罗萨","ALA","shield","vstripe"],
+  ["Las Palmas","拉斯帕尔马斯","拉帕","#FFE400","#004B9B",57,32400,"大加那利球场","LPA","round","solid"],
+  ["Leganes","莱加内斯","莱加内斯","#FFFFFF","#0A2B7F",55,12400,"布塔克球场","LEG","shield","vstripe"],
+  ["Real Valladolid","巴利亚多利德","巴拉多利","#921B88","#FFFFFF",54,27600,"何塞索里利亚","VLL","crest","vstripe"]],
+ // 西乙
+ [["Levante","莱万特","莱万特","#004A9E","#B4123E",52,26300,"瓦伦西亚城市球场","LEV","shield","vstripe"],
+  ["Almeria","阿尔梅里亚","阿尔梅里亚","#E2001A","#FFFFFF",52,15300,"地中海运动会球场","ALM","round","vstripe"],
+  ["Granada","格拉纳达","格拉纳达","#C31632","#FFFFFF",51,19300,"新卡门球场","GRA","shield","hoops"],
+  ["Elche","埃尔切","埃尔切","#FFFFFF","#00953B",51,33700,"马丁瓦莱罗","ELC","crest","vstripe"],
+  ["Sporting Gijon","希洪竞技","希洪","#E31B23","#FFFFFF",50,29000,"埃尔莫利农","SPG","shield","vstripe"],
+  ["Real Oviedo","奥维耶多","奥维耶多","#0B3D91","#FFFFFF",50,30500,"卡洛斯塔尔蒂埃雷","OVI","round","solid"],
+  ["Racing Santander","桑坦德竞技","桑坦德","#00803E","#FFFFFF",49,22200,"萨尔迪内罗","RAC","shield","solid"],
+  ["Real Zaragoza","萨拉戈萨","萨拉戈萨","#FFFFFF","#0A4F9E",48,33600,"罗马雷达","ZAR","crest","solid"],
+  ["Malaga","马拉加","马拉加","#79BDE8","#FFFFFF",48,30000,"玫瑰园球场","MAL","shield","vstripe"],
+  ["Cadiz","加的斯","加的斯","#FFE700","#0033A0",47,20700,"新米兰迪拉球场","CAD","round","solid"],
+  ["Deportivo La Coruna","拉科鲁尼亚","拉科","#005CA9","#FFFFFF",47,32700,"里亚索球场","DEP","shield","vstripe"],
+  ["Eibar","埃瓦尔","埃瓦尔","#B01F39","#0A2C84",46,8100,"伊普鲁亚球场","EIB","shield","halves"],
+  ["Burgos","布尔戈斯","布尔戈斯","#FFFFFF","#000000",44,12200,"埃尔普兰蒂奥","BUR","round","vstripe"],
+  ["Huesca","韦斯卡","韦斯卡","#0A2A7A","#B1153D",44,9100,"阿尔科拉斯球场","HUE","shield","vstripe"],
+  ["Tenerife","特内里费","特内里费","#FFFFFF","#0A4BA0",43,22800,"埃利奥多罗罗德里格斯","TEN","crest","solid"],
+  ["Albacete","阿尔瓦塞特","阿尔瓦塞特","#FFFFFF","#000000",42,17300,"卡洛斯贝尔蒙特","ALB","shield","solid"],
+  ["Cordoba","科尔多瓦","科尔多瓦","#00915A","#FFFFFF",42,21800,"新阿尔坎赫尔","COR","round","vstripe"],
+  ["Castellon","卡斯特利翁","卡斯特利翁","#000000","#FFFFFF",41,15500,"卡斯塔利亚球场","CAS","shield","vstripe"],
+  ["Mirandes","米兰德斯","米兰德斯","#E30613","#000000",40,5800,"安杜瓦球场","MIR","shield","halves"],
+  ["Cartagena","卡塔赫纳","卡塔赫纳","#000000","#FFFFFF",40,15100,"卡塔赫纳市政球场","CTG","round","solid"]]
+];
+
+// ---------- 意大利 ----------
+const CLUB_DATA_ITA = [
+ // 意甲
+ [["Inter","国际米兰","国米","#010E80","#000000",91,75800,"梅阿查球场","INT","shield","vstripe"],
+  ["Juventus","尤文图斯","尤文","#FFFFFF","#000000",88,41500,"安联球场","JUV","shield","vstripe"],
+  ["AC Milan","AC米兰","米兰","#FB090B","#000000",87,75800,"圣西罗球场","MIL","shield","vstripe"],
+  ["Napoli","那不勒斯","那不勒斯","#12A0D7","#FFFFFF",86,54700,"马拉多纳球场","NAP","round","solid"],
+  ["Atalanta","亚特兰大","亚特兰大","#1E71B8","#000000",82,21300,"意大利蓝色球场","ATA","shield","vstripe"],
+  ["Roma","罗马","罗马","#8E1F2F","#F0BC42",80,70600,"罗马奥林匹克","ROM","round","solid"],
+  ["Lazio","拉齐奥","拉齐奥","#87D8F7","#FFFFFF",78,70600,"罗马奥林匹克(L)","LAZ","round","solid"],
+  ["Fiorentina","佛罗伦萨","佛罗伦萨","#482E92","#FFFFFF",76,43100,"弗兰基球场","FIO","shield","solid"],
+  ["Bologna","博洛尼亚","博洛尼亚","#1A2F48","#A21C26",74,36500,"达拉拉球场","BOL","shield","halves"],
+  ["Torino","都灵","都灵","#8A1E03","#FFFFFF",67,27900,"大都灵球场","TOR","shield","solid"],
+  ["Udinese","乌迪内斯","乌迪内斯","#000000","#FFFFFF",64,25100,"弗留利球场","UDI","round","vstripe"],
+  ["Genoa","热那亚","热那亚","#A21C26","#0B1F5B",63,33200,"费拉里斯球场","GEN","shield","halves"],
+  ["Parma","帕尔马","帕尔马","#FFE800","#1B3A8C",60,22400,"塔尔迪尼球场","PAR","shield","chevron"],
+  ["Como","科莫","科莫","#0B2C6A","#FFFFFF",60,13600,"西尼焦亚球场","COM","round","solid"],
+  ["Monza","蒙扎","蒙扎","#E2001A","#FFFFFF",60,16900,"布里安泰奥球场","MON","shield","solid"],
+  ["Cagliari","卡利亚里","卡利亚里","#B01E2C","#0A2D6C",59,16400,"撒丁岛竞技场","CAG","shield","halves"],
+  ["Lecce","莱切","莱切","#FFE500","#D8232A",58,31500,"马佐拉球场","LEC","shield","vstripe"],
+  ["Hellas Verona","维罗纳","维罗纳","#FFE900","#0A2D6C",58,31000,"本特戈迪球场","VER","round","halves"],
+  ["Empoli","恩波利","恩波利","#0A5DAA","#FFFFFF",56,16800,"卡斯特拉尼球场","EMP","round","solid"],
+  ["Venezia","威尼斯","威尼斯","#000000","#F26A2C",54,11200,"皮埃尔路易吉彭佐","VEN","shield","solid"]],
+ // 意乙
+ [["Sassuolo","萨索洛","萨索洛","#00A752","#000000",55,21500,"马佩球场","SAS","shield","vstripe"],
+  ["Sampdoria","桑普多利亚","桑普","#1B5AA8","#FFFFFF",54,33200,"费拉里斯球场(S)","SAM","round","hoops"],
+  ["Palermo","巴勒莫","巴勒莫","#F7A9C4","#000000",52,36300,"巴尔贝拉球场","PAL","shield","solid"],
+  ["Cremonese","克雷莫纳","克雷莫纳","#9E1B32","#8E8E8E",50,16000,"佐尼球场","CRE","shield","vstripe"],
+  ["Pisa","比萨","比萨","#0A2C6A","#000000",49,14900,"加里巴尔迪竞技场","PIS","round","solid"],
+  ["Spezia","斯佩齐亚","斯佩齐亚","#FFFFFF","#000000",49,11400,"皮基球场","SPE","shield","solid"],
+  ["Bari","巴里","巴里","#FFFFFF","#E30613",48,58200,"圣尼古拉球场","BAR","round","solid"],
+  ["Salernitana","萨勒尼塔纳","萨勒尼塔纳","#7A1F3D","#FFFFFF",47,37200,"阿雷奇球场","SAL","shield","solid"],
+  ["Catanzaro","卡坦扎罗","卡坦扎罗","#FFE500","#E30613",46,14600,"切拉沃洛球场","CAT","shield","vstripe"],
+  ["Brescia","布雷西亚","布雷西亚","#1E5AA8","#FFFFFF",46,19000,"里加蒙蒂球场","BRE","shield","chevron"],
+  ["Frosinone","弗罗西诺内","弗罗西诺内","#FFE500","#0A3C8A",46,16200,"斯蒂尔佩球场","FRO","round","solid"],
+  ["Cesena","切塞纳","切塞纳","#FFFFFF","#000000",45,23800,"马努齐球场","CES","shield","solid"],
+  ["Modena","摩德纳","摩德纳","#FFE500","#0A3C8A",44,21100,"布拉利亚球场","MOD","shield","halves"],
+  ["Reggiana","雷吉亚纳","雷吉亚纳","#8A1E3D","#FFFFFF",42,21500,"马佩城市球场","REG","round","solid"],
+  ["Cittadella","奇塔代拉","奇塔代拉","#8A1E3D","#FFFFFF",41,7600,"通巴球场","CIT","shield","solid"],
+  ["Sudtirol","南蒂罗尔","南蒂罗尔","#FFFFFF","#E30613",41,5500,"德鲁苏斯球场","SUD","round","solid"],
+  ["Cosenza","科森扎","科森扎","#E30613","#0A3C8A",40,24200,"马鲁利亚球场","COS","shield","halves"],
+  ["Mantova","曼托瓦","曼托瓦","#FFFFFF","#E30613",39,7500,"马蒂内利球场","MAN","shield","vstripe"],
+  ["Carrarese","卡拉雷塞","卡拉雷塞","#0A3C8A","#FFE500",38,4300,"德伊马尔米球场","CAR","round","solid"],
+  ["Juve Stabia","尤维斯塔比亚","斯塔比亚","#FFE500","#0A3C8A",38,12800,"梅内亚球场","JST","shield","solid"]]
+];
+
+// ---------- 德国 ----------
+const CLUB_DATA_GER = [
+ // 德甲
+ [["Bayern Munich","拜仁慕尼黑","拜仁","#DC052D","#FFFFFF",94,75000,"安联竞技场","FCB","round","solid"],
+  ["Bayer Leverkusen","勒沃库森","药厂","#E32221","#000000",87,30200,"拜耳竞技场","B04","round","solid"],
+  ["Borussia Dortmund","多特蒙德","多特","#FDE100","#000000",85,81400,"信号伊杜纳公园","BVB","round","solid"],
+  ["RB Leipzig","莱比锡红牛","莱比锡","#FFFFFF","#DD0741",83,47100,"红牛竞技场","RBL","shield","solid"],
+  ["VfB Stuttgart","斯图加特","斯图加特","#FFFFFF","#E32219",78,60400,"MHP竞技场","VFB","shield","solid"],
+  ["Eintracht Frankfurt","法兰克福","法兰克福","#E1000F","#000000",77,58000,"德意志银行公园","SGE","round","solid"],
+  ["SC Freiburg","弗赖堡","弗赖堡","#000000","#E1000F",72,34700,"欧罗巴公园球场","SCF","shield","solid"],
+  ["VfL Wolfsburg","沃尔夫斯堡","狼堡","#65B32E","#FFFFFF",70,30000,"大众竞技场","WOB","round","solid"],
+  ["Borussia Monchengladbach","门兴格拉德巴赫","门兴","#FFFFFF","#000000",69,54000,"普鲁士公园","BMG","shield","vstripe"],
+  ["TSG Hoffenheim","霍芬海姆","霍芬海姆","#1C63B7","#FFFFFF",68,30100,"莱茵-内卡竞技场","TSG","round","solid"],
+  ["Mainz 05","美因茨","美因茨","#C3141E","#FFFFFF",66,33300,"美瓦竞技场","M05","round","solid"],
+  ["Union Berlin","柏林联合","柏林联","#EB1923","#FFFFFF",66,22000,"老林务所畔球场","FCU","shield","solid"],
+  ["Werder Bremen","不莱梅","不莱梅","#1D9053","#FFFFFF",65,42100,"威悉球场","SVW","diamond","solid"],
+  ["FC Augsburg","奥格斯堡","奥格斯堡","#FFFFFF","#BA3733",63,30700,"WWK竞技场","FCA","shield","solid"],
+  ["VfL Bochum","波鸿","波鸿","#005BA4","#FFFFFF",58,26000,"沃诺维亚鲁尔球场","BOC","round","solid"],
+  ["1. FC Heidenheim","海登海姆","海登海姆","#E30613","#0A3C8A",58,15000,"福伊特竞技场","HDH","shield","solid"],
+  ["FC St. Pauli","圣保利","圣保利","#5E3A2A","#FFFFFF",57,29500,"米勒门球场","STP","shield","solid"],
+  ["Holstein Kiel","荷尔斯泰因基尔","基尔","#005CA9","#FFFFFF",54,15000,"荷尔斯泰因球场","KIE","round","vstripe"]],
+ // 德乙
+ [["Hamburger SV","汉堡","汉堡","#0A5AA8","#FFFFFF",60,57000,"人民公园球场","HSV","diamond","solid"],
+  ["1. FC Koln","科隆","科隆","#FFFFFF","#E30613",60,50000,"莱茵能源球场","KOE","round","solid"],
+  ["Schalke 04","沙尔克04","沙尔克","#004D9D","#FFFFFF",58,62300,"费尔廷斯竞技场","S04","round","solid"],
+  ["Hertha BSC","柏林赫塔","赫塔","#005CA9","#FFFFFF",57,74500,"柏林奥林匹克","BSC","round","vstripe"],
+  ["Hannover 96","汉诺威96","汉诺威","#00A650","#000000",54,49000,"HDI竞技场","H96","round","solid"],
+  ["Fortuna Dusseldorf","杜塞尔多夫","杜塞","#E30613","#FFFFFF",54,54600,"莱茵梅尔库尔竞技场","F95","shield","solid"],
+  ["1. FC Kaiserslautern","凯泽斯劳滕","凯泽","#E30613","#FFFFFF",52,49800,"弗里茨瓦尔特球场","FCK","round","solid"],
+  ["1. FC Nurnberg","纽伦堡","纽伦堡","#8C0A1C","#FFFFFF",51,50000,"马克斯-莫洛克球场","FCN","shield","solid"],
+  ["Karlsruher SC","卡尔斯鲁厄","卡尔斯鲁厄","#00559F","#FFFFFF",50,34300,"野生公园球场","KSC","round","solid"],
+  ["SV Darmstadt 98","达姆施塔特","达姆","#004A9E","#FFFFFF",50,17800,"伯伦瀑布球场","D98","shield","solid"],
+  ["SC Paderborn","帕德博恩","帕德博恩","#005CA9","#000000",49,15000,"家庭球场","SCP","round","solid"],
+  ["1. FC Magdeburg","马格德堡","马格德堡","#0A4BA0","#FFFFFF",48,30100,"MDCC竞技场","FCM","shield","solid"],
+  ["Greuther Furth","菲尔特","菲尔特","#FFFFFF","#00A650",46,16600,"体育公园罗恩霍夫","SGF","shield","solid"],
+  ["SV Elversberg","埃尔弗斯贝格","埃尔弗斯贝格","#000000","#FFFFFF",45,10000,"乌尔萨皮内球场","ELV","round","solid"],
+  ["Eintracht Braunschweig","布伦瑞克","布伦瑞克","#FFE500","#0A4BA0",44,23300,"布伦瑞克球场","EBS","shield","solid"],
+  ["Preussen Munster","普鲁士明斯特","明斯特","#00A650","#000000",41,14300,"普鲁士球场","PRM","round","solid"],
+  ["Jahn Regensburg","雷根斯堡","雷根斯堡","#E30613","#FFFFFF",40,15200,"雅恩球场","JRE","shield","solid"],
+  ["SSV Ulm","乌尔姆","乌尔姆","#000000","#FFFFFF",40,17400,"多瑙球场","ULM","round","solid"]]
+];
+
+// ---------- 法国 ----------
+const CLUB_DATA_FRA = [
+ // 法甲
+ [["Paris Saint-Germain","巴黎圣日耳曼","巴黎","#004170","#DA291C",92,47900,"王子公园球场","PSG","round","sash"],
+  ["Marseille","马赛","马赛","#FFFFFF","#2FAEE0",78,67400,"韦洛德罗姆球场","OM","round","solid"],
+  ["Monaco","摩纳哥","摩纳哥","#E51B22","#FFFFFF",78,18500,"路易二世球场","ASM","shield","halves"],
+  ["Lyon","里昂","里昂","#FFFFFF","#DA291C",76,59200,"里昂公园球场","OL","shield","sash"],
+  ["Lille","里尔","里尔","#E1000F","#FFFFFF",75,50100,"皮埃尔莫鲁瓦球场","LIL","round","solid"],
+  ["Nice","尼斯","尼斯","#E30613","#000000",72,36200,"里维埃拉球场","OGC","shield","vstripe"],
+  ["Lens","朗斯","朗斯","#FFD500","#E30613",71,38200,"博拉尔-德勒利球场","RCL","shield","halves"],
+  ["Rennes","雷恩","雷恩","#E30613","#000000",70,29800,"罗阿宗公园","SRF","round","solid"],
+  ["Brest","布雷斯特","布雷斯特","#E30613","#FFFFFF",66,15200,"弗朗西斯勒布莱球场","SB2","shield","solid"],
+  ["Strasbourg","斯特拉斯堡","斯特拉斯堡","#0A5AA8","#FFFFFF",64,26100,"梅诺球场","RCS","round","solid"],
+  ["Toulouse","图卢兹","图卢兹","#6A2C91","#FFFFFF",63,33100,"图卢兹市政球场","TFC","shield","solid"],
+  ["Reims","兰斯","兰斯","#E30613","#FFFFFF",62,21000,"奥古斯特德洛纳球场","SDR","round","solid"],
+  ["Nantes","南特","南特","#FFE500","#00A650",60,35300,"博茹瓦尔球场","FCN","round","solid"],
+  ["Saint-Etienne","圣埃蒂安","圣埃蒂安","#00A650","#FFFFFF",58,41900,"若弗鲁瓦-吉沙尔球场","ASS","shield","solid"],
+  ["Montpellier","蒙彼利埃","蒙彼利埃","#0A2C6A","#F26A2C",57,32900,"莫松球场","MHS","round","solid"],
+  ["Auxerre","欧塞尔","欧塞尔","#FFFFFF","#0A4BA0",56,18500,"阿贝德尚球场","AJA","shield","solid"],
+  ["Angers","昂热","昂热","#000000","#FFFFFF",54,18700,"雷蒙德科帕球场","SCO","round","vstripe"],
+  ["Le Havre","勒阿弗尔","勒阿弗尔","#87CEEB","#0A2C6A",53,25200,"海洋球场","HAC","shield","halves"]],
+ // 法乙
+ [["Lorient","洛里昂","洛里昂","#F26A2C","#000000",52,18100,"穆斯托瓦球场","FCL","round","solid"],
+  ["Metz","梅斯","梅斯","#7A1F3D","#FFFFFF",51,30000,"圣桑福里安球场","FCM","shield","solid"],
+  ["Paris FC","巴黎FC","巴黎FC","#0A2C6A","#FFFFFF",50,20000,"夏莱蒂球场","PFC","round","solid"],
+  ["Guingamp","甘冈","甘冈","#E30613","#000000",47,18100,"鲁杜鲁球场","EAG","shield","halves"],
+  ["Caen","卡昂","卡昂","#0A4BA0","#E30613",47,20300,"米歇尔多尔纳诺球场","SMC","round","solid"],
+  ["Troyes","特鲁瓦","特鲁瓦","#0A4BA0","#FFFFFF",46,20400,"欧贝球场","EST","shield","solid"],
+  ["Clermont","克莱蒙","克莱蒙","#E30613","#0A4BA0",46,11900,"加布里埃尔蒙皮埃球场","CF6","round","solid"],
+  ["Bastia","巴斯蒂亚","巴斯蒂亚","#0A4BA0","#FFFFFF",45,16000,"阿尔芒塞萨里球场","SCB","shield","solid"],
+  ["Amiens","亚眠","亚眠","#FFFFFF","#8A8A8A",45,12000,"利科恩球场","ASC","round","solid"],
+  ["Grenoble","格勒诺布尔","格勒诺布尔","#0A4BA0","#FFFFFF",43,20000,"阿尔卑斯球场","GF3","shield","solid"],
+  ["Laval","拉瓦勒","拉瓦勒","#F26A2C","#000000",43,18700,"弗朗西斯勒巴塞球场","LAV","round","solid"],
+  ["Ajaccio","阿雅克肖","阿雅克肖","#E30613","#FFFFFF",42,10400,"弗朗索瓦科蒂球场","ACA","shield","solid"],
+  ["Pau","波城","波城","#FFE500","#0A4BA0",42,4000,"新球场","PAU","round","solid"],
+  ["Rodez","罗德兹","罗德兹","#7A1F3D","#FFE500",41,6000,"帕尔沃拉球场","RAF","shield","solid"],
+  ["Annecy","阿讷西","阿讷西","#E30613","#FFFFFF",41,15700,"帕尔克德斯波尔球场","FCA","round","solid"],
+  ["Dunkerque","敦刻尔克","敦刻尔克","#0A4BA0","#FFFFFF",40,4200,"马塞尔特里布球场","USL","shield","solid"],
+  ["Red Star","红星","红星","#00A650","#FFFFFF",40,10000,"鲍尔球场","RSP","round","solid"],
+  ["Martigues","马蒂格","马蒂格","#F26A2C","#FFFFFF",38,11500,"弗朗西斯图尔坎球场","MAR","shield","solid"]]
+];
+
+// ---------- 欧洲其他豪门（只参加欧战，不打联赛）----------
+// 额外字段：所属国家中文、姓名语区
+const EURO_CLUBS = [
+ ["Benfica","本菲卡","本菲卡","#E30613","#FFFFFF",79,64600,"光明球场","SLB","round","solid","葡萄牙","por"],
+ ["Porto","波尔图","波尔图","#0A4BA0","#FFFFFF",78,50000,"巨龙球场","FCP","shield","vstripe","葡萄牙","por"],
+ ["Sporting CP","里斯本竞技","葡体","#00A650","#FFFFFF",77,50000,"阿尔瓦拉德球场","SCP","round","hoops","葡萄牙","por"],
+ ["Braga","布拉加","布拉加","#E30613","#FFFFFF",67,30300,"布拉加市政球场","SCB","shield","solid","葡萄牙","por"],
+ ["PSV Eindhoven","埃因霍温","埃因霍温","#E30613","#FFFFFF",76,35000,"飞利浦球场","PSV","round","vstripe","荷兰","ned"],
+ ["Ajax","阿贾克斯","阿贾克斯","#FFFFFF","#D2122E",75,55600,"约翰克鲁伊夫竞技场","AJA","round","solid","荷兰","ned"],
+ ["Feyenoord","费耶诺德","费耶诺德","#E30613","#FFFFFF",74,51100,"德库伊普","FEY","shield","halves","荷兰","ned"],
+ ["AZ Alkmaar","阿尔克马尔","阿尔克马尔","#E30613","#FFFFFF",65,19500,"AFAS球场","AZ","round","solid","荷兰","ned"],
+ ["Celtic","凯尔特人","凯尔特人","#00A650","#FFFFFF",72,60400,"凯尔特人公园","CEL","round","hoops","苏格兰","eng"],
+ ["Rangers","格拉斯哥流浪者","流浪者","#0A4BA0","#FFFFFF",68,50800,"埃布罗克斯","RAN","shield","solid","苏格兰","eng"],
+ ["Galatasaray","加拉塔萨雷","加拉塔","#FDB912","#A90432",74,52200,"拉姆斯公园","GAL","round","halves","土耳其","tur"],
+ ["Fenerbahce","费内巴切","费内","#FFE500","#0A2C6A",72,47800,"于尔克尔球场","FEN","shield","vstripe","土耳其","tur"],
+ ["Besiktas","贝西克塔斯","贝西克塔斯","#000000","#FFFFFF",66,42600,"图普拉克球场","BJK","round","vstripe","土耳其","tur"],
+ ["Club Brugge","布鲁日","布鲁日","#0A4BA0","#000000",70,29000,"扬布雷德尔球场","CLB","shield","solid","比利时","ned"],
+ ["Anderlecht","安德莱赫特","安德莱赫特","#6A2C91","#FFFFFF",63,21500,"洛托公园","AND","round","solid","比利时","fra"],
+ ["Shakhtar Donetsk","顿涅茨克矿工","矿工","#F26A2C","#000000",70,34900,"顿巴斯竞技场","SHK","shield","solid","乌克兰","ukr"],
+ ["Dynamo Kyiv","基辅迪纳摩","基辅迪纳摩","#FFFFFF","#0A4BA0",62,70000,"基辅奥林匹克","DYK","round","solid","乌克兰","ukr"],
+ ["Red Bull Salzburg","萨尔茨堡红牛","萨尔茨堡","#FFFFFF","#DD0741",69,30200,"红牛竞技场(S)","RBS","shield","solid","奥地利","ger"],
+ ["Sturm Graz","格拉茨风暴","格拉茨","#000000","#FFFFFF",60,16400,"梅尔库尔竞技场","STU","round","solid","奥地利","ger"],
+ ["Olympiacos","奥林匹亚科斯","奥林匹亚科斯","#E30613","#FFFFFF",67,32100,"卡拉伊斯卡基斯球场","OLY","shield","vstripe","希腊","gre"],
+ ["PAOK","塞萨洛尼基","PAOK","#000000","#FFFFFF",62,28700,"通巴球场(P)","PAO","round","solid","希腊","gre"],
+ ["FC Copenhagen","哥本哈根","哥本哈根","#FFFFFF","#0A4BA0",64,38000,"帕肯球场","FCK","shield","solid","丹麦","nor"],
+ ["Young Boys","伯尔尼年轻人","年轻人","#FFE500","#000000",62,31800,"伯尔尼万科多夫球场","YB","round","solid","瑞士","ger"],
+ ["Slavia Praha","布拉格斯拉维亚","斯拉维亚","#E30613","#FFFFFF",65,19400,"伊甸竞技场","SLA","shield","halves","捷克","pol"],
+ ["Red Star Belgrade","贝尔格莱德红星","红星","#E30613","#FFFFFF",65,51700,"拉伊科米蒂奇球场","RSB","round","hoops","塞尔维亚","bal"],
+ ["Dinamo Zagreb","萨格勒布迪纳摩","萨格勒布","#0A4BA0","#FFFFFF",65,35100,"马克西米尔球场","DZG","shield","solid","克罗地亚","bal"]
+];
+
+// 按国家聚合：CLUB_DATA[nation][tier] = 球队行数组
+const CLUB_DATA=[CLUB_DATA_ENG,CLUB_DATA_ESP,CLUB_DATA_ITA,CLUB_DATA_GER,CLUB_DATA_FRA];
+NATIONS.forEach((n,ni)=>n.tiers.forEach((t,ti)=>{ t.n=CLUB_DATA[ni][ti].length; }));
+// 联赛全局编号（0..10）：按国家、层级顺序
+const LEAGUE_DEFS=[];
+NATIONS.forEach((n,ni)=>n.tiers.forEach((t,ti)=>{ t.lg=LEAGUE_DEFS.length; LEAGUE_DEFS.push({lg:LEAGUE_DEFS.length,nation:ni,tier:ti,name:t.name,short:t.short,n:t.n,price:t.price,prize:t.prize}); }));
+const lgIndex=(nation,tier)=> (NATIONS[nation]&&NATIONS[nation].tiers[tier])? NATIONS[nation].tiers[tier].lg : -1;
+
 
 // ---------- 姓名池（虚构球员）----------
 // 每项为「英文|中文音译」。按语区分组，生成时先抽语区再抽名与姓，
@@ -497,7 +761,16 @@ const NAME_POOLS = {
     l:"Mensah|门萨 Owusu|奥乌苏 Boateng|博阿滕 Asante|阿桑特 Adeyemi|阿德耶米 Okafor|奥卡福" },
   aff:{ w:5, n:"西非(法语区)", c:"塞内加尔 科特迪瓦 马里 几内亚 喀麦隆",
     f:"Bakary|巴卡里 Lamine|拉明 Ousmane|乌斯曼 Ibrahim|易卜拉欣 Amadou|阿马杜 Moussa|穆萨 Youssef|优素福",
-    l:"Diallo|迪亚洛 Traore|特拉奥雷 Camara|卡马拉 Sylla|西拉 Toure|图雷 Keita|凯塔 Cisse|西塞 Ndiaye|恩迪亚耶" }
+    l:"Diallo|迪亚洛 Traore|特拉奥雷 Camara|卡马拉 Sylla|西拉 Toure|图雷 Keita|凯塔 Cisse|西塞 Ndiaye|恩迪亚耶" },
+  tur:{ w:2, n:"土耳其", c:"土耳其 土耳其 土耳其 阿塞拜疆",
+    f:"Arda|阿尔达 Kerem|凯雷姆 Hakan|哈坎 Burak|布拉克 Cengiz|岑吉兹 Mert|梅尔特 Emre|埃姆雷 Ozan|奥赞 Yusuf|优素福 Baris|巴里什",
+    l:"Yilmaz|耶尔马兹 Kaya|卡亚 Demir|德米尔 Sahin|沙欣 Celik|切利克 Yildiz|耶尔德兹 Aydin|艾登 Ozturk|厄兹图尔克 Kilic|克勒奇 Aslan|阿斯兰" },
+  gre:{ w:1, n:"希腊", c:"希腊 希腊 塞浦路斯",
+    f:"Giorgos|乔治斯 Dimitris|迪米特里斯 Kostas|科斯塔斯 Nikos|尼科斯 Christos|赫里斯托斯 Vasilis|瓦西利斯 Petros|彼得罗斯",
+    l:"Papadopoulos|帕帕多普洛斯 Nikolaou|尼古拉乌 Georgiou|乔治乌 Ioannidis|约安尼迪斯 Mavropanos|马夫罗帕诺斯 Karagounis|卡拉古尼斯" },
+  ukr:{ w:1, n:"乌克兰", c:"乌克兰 乌克兰 乌克兰 格鲁吉亚",
+    f:"Oleksandr|奥列克桑德 Andriy|安德里 Mykola|米科拉 Taras|塔拉斯 Dmytro|德米特罗 Bohdan|博赫丹 Serhiy|谢尔盖",
+    l:"Shevchenko|舍甫琴科 Bondarenko|邦达连科 Kovalenko|科瓦连科 Tkachenko|特卡琴科 Melnyk|梅尔尼克 Zinchenko|津琴科 Boyko|博伊科" }
 };
 
 // 展开为「英文数组 + 中文对照表」，并按权重铺成抽签盘
@@ -516,6 +789,17 @@ for(const k in NAME_POOLS){
 // 全量池（球探搜索等场景需要）
 const FIRST_NAMES = REGIONS.flatMap(k=>NAME_POOLS[k].first);
 const LAST_NAMES  = REGIONS.flatMap(k=>NAME_POOLS[k].last);
+// 各国俱乐部的球员语区抽签盘：本国语区占大头，其余按外援常见来源分配
+const FOREIGN_W={eng:5,fra:6,ita:4,esp:5,ger:4,por:6,ned:3,nor:3,bal:4,pol:2,afe:4,aff:5,tur:2,gre:1,ukr:1};
+const NATION_EXTRA={ENG:{afe:3,eng:6},ESP:{por:4},ITA:{bal:3,por:2},GER:{tur:3,pol:2,ned:2},FRA:{aff:9,afe:2}};
+const WHEEL_CACHE={};
+function regionWheelFor(rg, code){
+  const key=rg+"|"+(code||"");
+  if(WHEEL_CACHE[key]) return WHEEL_CACHE[key];
+  const wheel=[]; const extra=NATION_EXTRA[code]||{};
+  for(const k in NAME_POOLS){ let w=(FOREIGN_W[k]||1)+(extra[k]||0); if(k===rg) w=48; for(let i=0;i<w;i++) wheel.push(k); }
+  return WHEEL_CACHE[key]=wheel;
+}
 
 // ---------- 位置 ----------
 const POSITIONS = ["GK","DC","DL","DR","DM","MC","ML","MR","AM","ST"];
@@ -591,34 +875,7 @@ const TRAIN_FOCUS = {
 
 // 每队 [外形, 底纹]  外形: shield 尖盾 / crest 平顶盾 / round 圆形 / diamond 菱形
 // 底纹: solid 纯色 / vstripe 竖条 / hoops 横环 / halves 左右分色 / sash 斜带 / quarters 四分 / chevron 人字
-const CREST_STYLE=[
- // 英超
- ["round","solid"],["shield","solid"],["crest","solid"],["round","solid"],["round","solid"],
- ["shield","solid"],["shield","vstripe"],["shield","halves"],["crest","solid"],["shield","vstripe"],
- ["shield","solid"],["crest","solid"],["shield","sash"],["round","solid"],["shield","vstripe"],
- ["round","solid"],["crest","vstripe"],["round","solid"],["shield","vstripe"],["round","solid"],
- // 英冠
- ["round","solid"],["shield","vstripe"],["crest","solid"],["shield","vstripe"],["shield","vstripe"],
- ["round","solid"],["crest","solid"],["shield","vstripe"],["shield","vstripe"],["round","solid"],
- ["shield","solid"],["crest","solid"],["shield","solid"],["round","solid"],["crest","vstripe"],
- ["round","solid"],["shield","halves"],["crest","solid"],["shield","chevron"],["shield","solid"],
- // 英甲
- ["round","solid"],["shield","solid"],["crest","solid"],["shield","vstripe"],["round","solid"],
- ["shield","solid"],["crest","hoops"],["round","solid"],["shield","solid"],["round","solid"],
- ["crest","solid"],["shield","solid"],["shield","quarters"],["crest","vstripe"],["round","solid"],
- ["shield","vstripe"],["crest","solid"],["shield","solid"],["round","solid"],["crest","sash"]
-];
-
-
-// 三字母缩写（按足球界通行写法，与真实商标无关）
-const CREST_ABBR=[
- "MCI","LIV","ARS","MUN","CHE","TOT","NEW","AVL","WHU","BHA",
- "EVE","WOL","CRY","FUL","BRE","NFO","BOU","LEI","SOU","IPS",
- "LEE","SUN","BUR","SHU","WBA","NOR","MID","STK","SHW","COV",
- "DER","WAT","CAR","SWA","HUL","BRC","BLB","PNE","MIL","POR",
- "BIR","WRE","BOL","HUD","LUT","CHA","REA","BAR","WIG","BLP",
- "ROT","PET","BRR","LIN","NTH","EXE","BUT","SHR","STE","LEY"
-];
+// 队徽外形/缩写已并入各队数据行
 
 // ---------- 颜色工具 ----------
 function hex2rgb(h){ h=h.replace("#",""); if(h.length===3) h=h.split("").map(c=>c+c).join("");
@@ -631,8 +888,8 @@ function shade(h,f){ const [r,g,b]=hex2rgb(h);
   const m=v=>Math.round(clamp(f<0? v*(1+f) : v+(255-v)*f,0,255));
   return "#"+[m(r),m(g),m(b)].map(v=>v.toString(16).padStart(2,"0")).join(""); }
 
-function initialsOf(en, idx){
-  if(idx!=null && CREST_ABBR[idx]) return CREST_ABBR[idx];
+function initialsOf(en, abbr){
+  if(abbr) return abbr;
   const w=en.replace(/[^A-Za-z ]/g,"").split(/\s+/).filter(Boolean);
   if(w.length===1) return w[0].slice(0,3).toUpperCase();
   if(w.length===2) return (w[0][0]+w[1][0]).toUpperCase();
@@ -670,15 +927,15 @@ function starRow(n,y){
 
 // ---------- 生成 SVG ----------
 function buildCrestSVG(c){
-  const idx = c.crestIdx!=null? c.crestIdx : c.id;
-  const [shape,pat]=CREST_STYLE[idx%60]||["shield","solid"];
+  const idx = "c"+hashStr(c.en).toString(36);
+  const shape=c.shape||"shield", pat=c.pat||"solid";
   let c1=c.c1, c2=c.c2;
   if(contrast(c1,c2)<1.35) c2 = lum(c1)>0.5? shade(c1,-0.55) : shade(c1,0.55);
   const dark = lum(c1)>0.55;
   const border = dark? shade(c1,-0.62) : shade(c1,-0.35);
   const band   = dark? "#111820" : "#ffffff";
   let txt = contrast(c1,band)>=2.6? c1 : (contrast(c2,band)>=2.6? c2 : (band==="#ffffff"?"#111820":"#ffffff"));
-  const ini=initialsOf(c.en, idx%60);
+  const ini=initialsOf(c.en, c.abbr);
   const stars = c.rep>=85?3 : c.rep>=68?2 : c.rep>=48?1 : 0;
   const fs = ini.length>=3? 15.5 : 18;
   const clip=`cl${idx}`;
@@ -713,21 +970,31 @@ let CUSTOM_CRESTS={};
 const CRESTKEY="fmweb_crests_v1";
 function loadCustomCrests(){
   try{ CUSTOM_CRESTS=JSON.parse(localStorage.getItem(CRESTKEY)||"{}"); }catch(e){ CUSTOM_CRESTS={}; }
+  // 旧版按球队编号(0-59)保存，迁移为按英文名保存
+  let moved=false;
+  Object.keys(CUSTOM_CRESTS).forEach(k=>{
+    if(/^\d+$/.test(k)){ const i=+k, row=CLUB_DATA_ENG[Math.floor(i/20)]&&CLUB_DATA_ENG[Math.floor(i/20)][i%20];
+      if(row) CUSTOM_CRESTS[row[0]]=CUSTOM_CRESTS[k]; delete CUSTOM_CRESTS[k]; moved=true; }
+  });
+  if(moved) saveCustomCrests();
 }
 function saveCustomCrests(){
   try{ localStorage.setItem(CRESTKEY,JSON.stringify(CUSTOM_CRESTS)); return true; }
   catch(e){ return false; }
 }
 function crestURI(c){
-  if(CUSTOM_CRESTS[c.id]) return CUSTOM_CRESTS[c.id];
-  if(CREST_CACHE[c.id]) return CREST_CACHE[c.id];
+  if(CUSTOM_CRESTS[c.en]) return CUSTOM_CRESTS[c.en];
+  if(CREST_CACHE[c.en]) return CREST_CACHE[c.en];
   const uri="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(buildCrestSVG(c));
-  CREST_CACHE[c.id]=uri; return uri;
+  CREST_CACHE[c.en]=uri; return uri;
 }
-function clubFromData(tier,idx){
-  const [en,cn,sh,c1,c2,rep,cap,st]=CLUB_DATA[tier][idx];
-  return {id:tier*20+idx, crestIdx:tier*20+idx, en,cn,short:sh,c1,c2,rep,cap,stadium:st,tier};
+// 由数据行构造俱乐部基础对象（不含阵容）
+function clubFromRow(row, nation, tier){
+  const [en,cn,sh,c1,c2,rep,cap,st,abbr,shape,pat,country,rg]=row;
+  return {en,cn,short:sh,c1,c2,rep,cap,stadium:st,abbr,shape,pat,nation,tier,
+          country:country||(NATIONS[nation]?NATIONS[nation].name:""), rg:rg||(NATIONS[nation]?NATIONS[nation].rg:"eng")};
 }
+function clubFromData(nation,tier,idx){ return clubFromRow(CLUB_DATA[nation][tier][idx],nation,tier); }
 /* =========================================================
    随机数 / 球员生成 / 世界初始化
    ========================================================= */
@@ -816,12 +1083,14 @@ function calcWage(p, rep){
 let PID=1;
 function nextPid(){ if(WORLD && WORLD.pid!=null){ WORLD.pid++; return WORLD.pid; } return PID++; }
 function makePlayer(lvl, pos, age, clubId){
-  const rg=pick(REGION_WHEEL), pool=NAME_POOLS[rg];
+  const club = (clubId>=0 && WORLD && WORLD.clubs[clubId]) ? WORLD.clubs[clubId] : null;
+  const wheel = club ? regionWheelFor(club.rg, NATIONS[club.nation]?NATIONS[club.nation].code:"") : REGION_WHEEL;
+  const rg=pick(wheel), pool=NAME_POOLS[rg];
   const first=pick(pool.first), last=pick(pool.last);
   const A=genAttrs(lvl,pos);
   const p={
     id:nextPid(), first, last, name:first+" "+last, cn:toCN(first,last),
-    pos, pos2:[], age, clubId, nat:pick(pool.nat), rg,
+    pos, pos2:[], age, clubId, nat:(club && club.nation===EURO_NATION && rg===club.rg && club.country)? club.country : pick(pool.nat), rg,
     a:A, ca:0, pa:0,
     condition:100, morale:ri(60,88), injury:0, injType:"", sharp:ri(70,95),
     contract:0, wage:0, value:0,
@@ -873,22 +1142,25 @@ function genSquad(club){
 // ---------- 世界 ----------
 let WORLD=null;
 
-function newWorld(seed, userClubIdx, userTier){
+function newWorld(seed, userClubEn){
   seedRng(seed); PID=1;
   WORLD={
-    pid:0, seed, season:2026, day:0, date:null,
-    players:{}, clubs:[], leagues:[], cup:null,
+    ver:2, pid:0, seed, season:2026, day:0, date:null,
+    players:{}, clubs:[], leagues:[], cups:[], euro:null, euroQual:null,
     userClub:0, news:[], inbox:[], transferLog:[], history:[],
     freeAgents:[], scoutReports:[], shortlist:[],
     settings:{speed:2, autoSub:true},
     started:false
   };
   let cid=0;
-  CLUB_DATA.forEach((tierArr,tier)=>{
-    tierArr.forEach(cd=>{
-      const [en,cn,sh,c1,c2,rep,cap,st]=cd;
+  const rows=[];
+  CLUB_DATA.forEach((nat,ni)=>nat.forEach((tierArr,ti)=>tierArr.forEach(row=>rows.push([row,ni,ti]))));
+  EURO_CLUBS.forEach(row=>rows.push([row,EURO_NATION,0]));
+  rows.forEach(([row,ni,ti])=>{
+    {
+      const base=clubFromRow(row,ni,ti); const rep=base.rep;
       const club={
-        id:cid++, en, cn, short:sh, c1, c2, rep, cap, stadium:st, tier,
+        id:cid++, ...base, lg:lgIndex(ni,ti),
         squad:[], tactic:defaultTactic(), lineup:[], subs:[],
         finance:{ balance: Math.round(Math.pow(rep,3)*40 + ri(-400000,2000000)),
                   transferBudget:0, wageBudget:0, income:0, expense:0, ledger:[] },
@@ -904,7 +1176,7 @@ function newWorld(seed, userClubIdx, userTier){
       club.finance.wageBudget = Math.round(Math.pow(rep,3)*245 + 1800000);   // 年度工资预算
       club.finance.transferBudget = Math.round(Math.pow(rep,3)*150 + 400000);
       WORLD.clubs.push(club);
-    });
+    }
   });
   WORLD.clubs.forEach(c=>genSquad(c));
   WORLD.clubs.forEach(c=>{ autoPickLineup(c); });
@@ -918,8 +1190,7 @@ function newWorld(seed, userClubIdx, userTier){
   }
   // 初代超级妖人
   spawnWonderkids(ri(3,5));
-  WORLD.userClub = WORLD.clubs.findIndex(c=>c.tier===userTier && c.id===userClubIdx);
-  if(WORLD.userClub<0) WORLD.userClub=userClubIdx;
+  WORLD.userClub = Math.max(0, WORLD.clubs.findIndex(c=>c.en===userClubEn));
   buildSeason();
   setBoardExpectation();
   return WORLD;
@@ -932,15 +1203,16 @@ function defaultTactic(){
 
 function setBoardExpectation(){
   WORLD.clubs.forEach(c=>{
-    const lg=WORLD.leagues[c.tier];
+    const lg=LG(c);
+    if(!lg){ c.board.expect="在欧战中有所作为"; c.board.target=99; return; }
     const sorted=[...lg.clubIds].sort((a,b)=>WORLD.clubs[b].rep-WORLD.clubs[a].rep);
-    const rank=sorted.indexOf(c.id)+1;
+    const rank=sorted.indexOf(c.id)+1, n=lg.clubIds.length;
     let e;
     if(rank<=2) e={txt:"争夺联赛冠军",target:1};
     else if(rank<=5) e={txt:"跻身前四",target:4};
     else if(rank<=9) e={txt:"冲击前六名",target:6};
-    else if(rank<=14) e={txt:"稳居中游",target:12};
-    else e={txt:"避免降级",target:17};
+    else if(rank<=n-6) e={txt:"稳居中游",target:Math.round(n*0.6)};
+    else e={txt:"避免降级",target:n-3};
     if(c.tier>0 && rank<=3) e={txt:"冲击升级",target:2};
     c.board.expect=e.txt; c.board.target=e.target;
   });
@@ -948,6 +1220,29 @@ function setBoardExpectation(){
 
 // ---------- 工具 ----------
 const P = id => WORLD.players[id];
+// 联赛相关小工具
+const LG  = c => (c && c.lg>=0 && WORLD.leagues[c.lg]) ? WORLD.leagues[c.lg] : null;
+const LGN = c => { const l=LG(c); return l? l.name : (c.nation===EURO_NATION? "欧洲其他球队" : "—"); };
+const LGS = c => { const l=LG(c); return l? l.short : (c.nation===EURO_NATION? (c.country||"欧洲") : "—"); };
+function leagueRowOf(c){ const l=LG(c); if(!l) return null; return leagueTable(l.lg).find(r=>r.id===c.id)||null; }
+// 赛事标签（用于赛程 / 战报）
+function compShort(f){
+  if(f.comp==="L") return WORLD.leagues[f.lg]? WORLD.leagues[f.lg].short : "联赛";
+  if(f.comp==="C") return NATIONS[f.nation]? NATIONS[f.nation].cup : "杯赛";
+  if(EURO_COMPS[f.comp]) return EURO_COMPS[f.comp].short;
+  return f.comp;
+}
+function compLabel(f){
+  if(f.comp==="L") return compShort(f)+" 第"+f.round+"轮";
+  if(f.comp==="C"){ const cup=WORLD.cups[f.nation]; return compShort(f)+" "+(cup? cup.roundNames[f.round-1] : "第"+f.round+"轮"); }
+  if(EURO_COMPS[f.comp]){
+    if(f.stage==="G") return compShort(f)+" 小组赛 第"+f.round+"轮";
+    const rn=EURO_KO_NAMES[f.round-1]||"淘汰赛";
+    return compShort(f)+" "+rn+(f.round<4? (f.leg===1?" 首回合":" 次回合") : "");
+  }
+  return f.comp;
+}
+function compTagCls(f){ return f.comp==="L"?"t-i": (f.comp==="C"?"t-w":"t-eu"); }
 const C = id => WORLD.clubs[id];
 const UC = () => WORLD.clubs[WORLD.userClub];
 function money(n){
@@ -995,80 +1290,305 @@ function roundRobin(ids){
 }
 function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 
+/* ---------- 赛季日历 ----------
+   以 8 月第一个周六（≥6 日）为第 0 周的周六，每周一个周末联赛轮次。
+   周中：周二 = 周六+3，周三 = 周六+4。
+   - 20 队联赛 38 轮：第 0–37 周；18 队联赛 34 轮：跳过第 12/19/20/30 周（冬歇等）
+   - 国内杯赛 6 轮：第 2/5/10/21/25/30 周周三，决赛第 38 周周六（中立场地）
+   - 欧战小组赛 6 轮：第 6/8/11/13/15/17 周（欧冠周二 / 欧联周三）
+   - 欧战淘汰赛：1/8 决赛 27 & 29 周，1/4 决赛 32 & 34 周，半决赛 35 & 37 周；
+     欧联决赛第 39 周周三，欧冠决赛第 40 周周六 */
+const EURO_KO_NAMES=["1/8决赛","1/4决赛","半决赛","决赛"];
+const CUP_ROUND_NAMES=["首轮","32强","16强","1/4决赛","半决赛","决赛"];
+const WEEKS_18_SKIP=[12,19,20,30];
+const CUP_WEEKS=[2,5,10,21,25,30];
+const EURO_GROUP_WEEKS=[6,8,11,13,15,17];
+const EURO_KO_WEEKS=[[27,29],[32,34],[35,37]];
+
+function seasonStart(){ let s=0; while(dateOf(s).getDay()!==6 || dateOf(s).getDate()<6) s++; return s; }
+function satOf(w){ return WORLD.calStart + w*7; }
+
 function buildSeason(){
   WORLD.fixtures=[];
-  WORLD.leagues=[0,1,2].map(tier=>({
-    tier, name:LEAGUE_NAMES[tier], short:LEAGUE_SHORT[tier],
-    clubIds: WORLD.clubs.filter(c=>c.tier===tier).map(c=>c.id),
-    table:{}, rounds:[]
+  WORLD.calStart=seasonStart();
+  // 联赛对象
+  WORLD.leagues=LEAGUE_DEFS.map(d=>({
+    lg:d.lg, nation:d.nation, tier:d.tier, name:d.name, short:d.short, price:d.price, prize:d.prize,
+    clubIds: WORLD.clubs.filter(c=>c.nation===d.nation && c.tier===d.tier).map(c=>c.id),
+    rounds:0
   }));
-  WORLD.clubs.forEach(c=>{ c.seasonStats={p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0}; c.form=[]; });
+  WORLD.clubs.forEach(c=>{ c.lg=lgIndex(c.nation,c.tier); c.seasonStats={p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0}; c.form=[]; c.euro=null; });
   Object.values(WORLD.players).forEach(p=>{
     p.last={apps:p.apps,goals:p.goals,assists:p.assists,rt:p.apps?p.ratingSum/p.apps:0,motm:p.motm};
     p.apps=0;p.goals=0;p.assists=0;p.cleanSheet=0;p.ratingSum=0;p.motm=0;p.yellow=0;p.red=0;p.susp=0;p.form=[];
   });
 
-  // 找到 8 月首个周六
-  let start=0; while(dateOf(start).getDay()!==6 || dateOf(start).getDate()<6) start++;
-  const matchDays=[]; for(let i=0;i<38;i++) matchDays.push(start + i*7);
-
+  // ---- 联赛 ----
   WORLD.leagues.forEach(lg=>{
     const half=roundRobin(shuffle([...lg.clubIds]));
     const all=[...half, ...half.map(r=>r.map(m=>[m[1],m[0]]))];
+    const weeks=[]; for(let w=0;w<38;w++){ if(all.length<38 && WEEKS_18_SKIP.includes(w)) continue; weeks.push(w); }
     all.forEach((rd,ri)=>{
-      const day=matchDays[ri];
+      const day=satOf(weeks[ri]);
       rd.forEach(([h,a])=>{
-        // 同轮次错开到周六/周日
-        const d = day + (rnd()<0.28?1:0);
-        WORLD.fixtures.push({day:d,home:h,away:a,comp:"L",tier:lg.tier,round:ri+1,played:false,hg:0,ag:0});
+        const d = day + (rnd()<0.28?1:0);   // 同轮次错开到周六/周日
+        WORLD.fixtures.push({day:d,home:h,away:a,comp:"L",lg:lg.lg,round:ri+1,played:false,hg:0,ag:0});
       });
     });
     lg.rounds=all.length;
   });
 
-  // ---------- 足总杯 ----------
-  const cupDays=[]; { let w=[10,17,23,29,33,36]; w.forEach(i=> cupDays.push(matchDays[i]+4)); }
-  WORLD.cup={ name:CUP_NAME, roundNames:["第三轮","第四轮","第五轮","1/4决赛","半决赛","决赛"],
-              days:cupDays, cur:0, alive:null, results:[], winner:null };
-  const all=WORLD.clubs.map(c=>c.id);
-  const seeds=WORLD.clubs.filter(c=>c.tier===0).sort((a,b)=>b.rep-a.rep).slice(0,4).map(c=>c.id);
-  const rest=shuffle(all.filter(i=>!seeds.includes(i)));
-  WORLD.cup.alive=[...rest];
-  WORLD.cup.byes=seeds;
-  scheduleCupRound();
+  // ---- 国内杯赛（每国一项，全体本国球队单场淘汰）----
+  WORLD.cups=NATIONS.map((nat,ni)=>{
+    const ids=WORLD.clubs.filter(c=>c.nation===ni).map(c=>c.id);
+    const days=CUP_WEEKS.map((w,i)=> i<5? satOf(w)+4 : satOf(38));
+    const byeN=Math.max(0, 64-ids.length);                    // 首轮轮空数，使首轮后恰好 32 队
+    const sorted=[...ids].sort((a,b)=>C(b).rep-C(a).rep);
+    const byes=sorted.slice(0,byeN), rest=shuffle(sorted.slice(byeN));
+    return { nation:ni, name:nat.cup, roundNames:CUP_ROUND_NAMES, days, cur:0, alive:rest, byes, results:[], winner:null };
+  });
+  WORLD.cups.forEach(cup=>scheduleCupRound(cup));
+
+  // ---- 欧战 ----
+  buildEuro();
+  WORLD.fixtures.sort((a,b)=>a.day-b.day);
 }
 
-function scheduleCupRound(){
-  const cup=WORLD.cup; if(cup.cur>=6) return;
-  let pool=[...cup.alive];
-  if(cup.cur===0 && cup.byes) { /* 首轮 56 队 */ }
-  shuffle(pool);
+// ---------- 国内杯赛 ----------
+function scheduleCupRound(cup){
+  if(cup.cur>=6) return;
+  const pool=shuffle([...cup.alive]);
   const day=cup.days[cup.cur];
+  const isFinal = cup.cur===5;
   for(let i=0;i+1<pool.length;i+=2){
-    WORLD.fixtures.push({day, home:pool[i], away:pool[i+1], comp:"C", round:cup.cur+1, played:false, hg:0, ag:0, pens:null});
+    WORLD.fixtures.push({day, home:pool[i], away:pool[i+1], comp:"C", nation:cup.nation, round:cup.cur+1,
+                         played:false, hg:0, ag:0, pens:null, neutral:isFinal});
   }
   WORLD.fixtures.sort((a,b)=>a.day-b.day);
 }
-function advanceCupRound(){
-  const cup=WORLD.cup;
+function cupPrize(cup, roundIdx){
+  const scale=[1,0.8,0.7,0.7,0.5][cup.nation]||0.5;
+  return Math.round([1e5,2e5,4.5e5,9e5,1.8e6,3.6e6][roundIdx]*scale);
+}
+function advanceCupRound(cup){
   const day=cup.days[cup.cur];
-  const ms=WORLD.fixtures.filter(f=>f.comp==="C"&&f.day===day&&f.played);
-  let winners=ms.map(f=>{
-    if(f.hg>f.ag) return f.home;
-    if(f.ag>f.hg) return f.away;
-    return f.pens && f.pens[0]>f.pens[1] ? f.home : f.away;
-  });
+  const ms=WORLD.fixtures.filter(f=>f.comp==="C"&&f.nation===cup.nation&&f.day===day&&f.played);
+  let winners=ms.map(f=>winnerOf(f));
+  const losers=ms.map(f=> winnerOf(f)===f.home? f.away : f.home);
+  losers.forEach(id=>addMoney(C(id), cupPrize(cup,cup.cur), cup.name+cup.roundNames[cup.cur]+"奖金"));
   if(cup.cur===0 && cup.byes){ winners=winners.concat(cup.byes); cup.byes=null; }
   cup.results.push({round:cup.roundNames[cup.cur], matches:ms.map(f=>({h:f.home,a:f.away,hg:f.hg,ag:f.ag,pens:f.pens}))});
   cup.cur++;
   cup.alive=winners;
-  if(winners.length===1){ cup.winner=winners[0]; C(winners[0]).trophies.push(WORLD.season+" "+CUP_NAME); return; }
-  if(cup.cur<6) scheduleCupRound();
+  if(winners.length===1){
+    cup.winner=winners[0]; const w=C(winners[0]);
+    w.trophies.push(WORLD.season+" "+cup.name);
+    addMoney(w, cupPrize(cup,5), cup.name+"冠军奖金");
+    w.board.conf=clamp(w.board.conf+15,0,100);
+    if(w.id===WORLD.userClub) news(`${cup.name}冠军！`,`${w.cn} 捧起了 ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季的${cup.name}！`,"good");
+    else if(NATIONS[cup.nation] && UC().nation===cup.nation) news(`${cup.name}决赛`,`${w.cn} 夺得本赛季${cup.name}冠军。`,"info");
+    return;
+  }
+  if(cup.cur<6) scheduleCupRound(cup);
+}
+function winnerOf(f){
+  if(f.hg>f.ag) return f.home;
+  if(f.ag>f.hg) return f.away;
+  return f.pens && f.pens[0]>f.pens[1] ? f.home : f.away;
+}
+
+// ---------- 欧战：资格 ----------
+// 首个赛季按声望；之后由上赛季结算写入 WORLD.euroQual
+function defaultEuroQual(){
+  const q={CL:[],EL:[]};
+  NATIONS.forEach((nat,ni)=>{
+    const top=WORLD.clubs.filter(c=>c.nation===ni&&c.tier===0).sort((a,b)=>b.rep-a.rep);
+    q.CL.push(...top.slice(0,nat.cl).map(c=>c.id));
+    q.EL.push(...top.slice(nat.cl,nat.cl+nat.el+1).map(c=>c.id));  // 多一个名额代表杯赛冠军
+  });
+  return q;
+}
+function fillEuroWithOthers(q){
+  const others=WORLD.clubs.filter(c=>c.nation===EURO_NATION)
+    .map(c=>({id:c.id, s:c.rep+gauss(0,5)})).sort((a,b)=>b.s-a.s).map(x=>x.id);
+  const needCL=32-q.CL.length, needEL=32-q.EL.length;
+  q.CL.push(...others.slice(0,Math.max(0,needCL)));
+  q.EL.push(...others.slice(Math.max(0,needCL), Math.max(0,needCL)+Math.max(0,needEL)));
+  q.CL=q.CL.slice(0,32); q.EL=q.EL.slice(0,32);
+}
+
+// 分组抽签：按声望分 4 档，每组各档 1 队，尽量避免同国同组
+function drawGroups(ids){
+  const sorted=[...ids].sort((a,b)=>C(b).rep-C(a).rep);
+  const pots=[0,1,2,3].map(i=>sorted.slice(i*8,i*8+8));
+  const groups=[[],[],[],[],[],[],[],[]];
+  pots.forEach((pot,pi)=>{
+    let best=null, bestClash=1e9;
+    for(let tries=0;tries<40;tries++){
+      const order=shuffle([...pot]);
+      let clash=0;
+      order.forEach((id,gi)=>{ if(groups[gi].some(x=>C(x).nation===C(id).nation && C(id).nation!==EURO_NATION)) clash++; });
+      if(clash<bestClash){ bestClash=clash; best=order; if(clash===0) break; }
+    }
+    best.forEach((id,gi)=>groups[gi].push(id));
+  });
+  return groups;
+}
+
+function buildEuro(){
+  const q = WORLD.euroQual ? {CL:[...WORLD.euroQual.CL],EL:[...WORLD.euroQual.EL]} : defaultEuroQual();
+  // 剔除已不存在 / 重复
+  q.CL=[...new Set(q.CL)]; q.EL=[...new Set(q.EL)].filter(id=>!q.CL.includes(id));
+  fillEuroWithOthers(q);
+  WORLD.euro={};
+  ["CL","EL"].forEach(code=>{
+    const def=EURO_COMPS[code];
+    const ids=q[code];
+    const E={ code, name:def.name, short:def.short, teams:ids, groups:drawGroups(ids),
+      gtable:{}, stage:"G", gdays:EURO_GROUP_WEEKS.map(w=>satOf(w)+(code==="CL"?3:4)),
+      kdays:EURO_KO_WEEKS.map(([a,b])=>[satOf(a)+(code==="CL"?3:4), satOf(b)+(code==="CL"?3:4)]),
+      finalDay: code==="CL"? satOf(40) : satOf(39)+4,
+      ko:null, results:[], winner:null };
+    ids.forEach(id=>{ E.gtable[id]={p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0}; C(id).euro=code;
+      addMoney(C(id), def.prize.enter, def.short+"参赛奖金"); });
+    // 小组赛赛程：每组 4 队双循环 6 轮
+    E.groups.forEach((g,gi)=>{
+      const half=roundRobin(shuffle([...g]));
+      const all=[...half, ...half.map(r=>r.map(m=>[m[1],m[0]]))];
+      all.forEach((rd,ri)=>rd.forEach(([h,a])=>{
+        WORLD.fixtures.push({day:E.gdays[ri], home:h, away:a, comp:code, stage:"G", grp:gi, round:ri+1, played:false, hg:0, ag:0});
+      }));
+    });
+    WORLD.euro[code]=E;
+  });
+  const u=UC();
+  if(u.euro){ const E=WORLD.euro[u.euro]; const g=E.groups.find(g=>g.includes(u.id));
+    news(`${E.short}分组揭晓`,`${u.cn} 进入${E.name}第 ${String.fromCharCode(65+E.groups.indexOf(g))} 组，同组对手：${g.filter(i=>i!==u.id).map(i=>C(i).cn).join("、")}。`,"good"); }
+}
+function euroGroupTable(E, gi){
+  const rows=E.groups[gi].map(id=>{ const s=E.gtable[id]; return {id, ...s, gd:s.gf-s.ga}; });
+  rows.sort((a,b)=> b.pts-a.pts || b.gd-a.gd || b.gf-a.gf || C(b.id).rep-C(a.id).rep);
+  rows.forEach((r,i)=>r.rank=i+1);
+  return rows;
+}
+function euroApplyGroupResult(E, fx){
+  [[fx.home,fx.hg,fx.ag],[fx.away,fx.ag,fx.hg]].forEach(([id,gf,ga])=>{
+    const s=E.gtable[id]; if(!s) return;
+    s.p++; s.gf+=gf; s.ga+=ga;
+    if(gf>ga){s.w++;s.pts+=3; addMoney(C(id), EURO_COMPS[E.code].prize.win, E.short+"小组赛胜场奖金");}
+    else if(gf===ga){s.d++;s.pts++; addMoney(C(id), EURO_COMPS[E.code].prize.draw, E.short+"小组赛平局奖金");}
+    else s.l++;
+  });
+}
+// 淘汰赛：两回合，次回合总比分相同则点球
+function euroScheduleKO(E, pairs, roundIdx){
+  const [d1,d2]=E.kdays[roundIdx];
+  E.ko={round:roundIdx, ties:pairs.map(([a,b])=>({a,b}))};
+  pairs.forEach(([a,b],ti)=>{
+    // a 先主场
+    WORLD.fixtures.push({day:d1, home:a, away:b, comp:E.code, stage:"K", round:roundIdx+1, leg:1, tie:ti, played:false, hg:0, ag:0});
+    WORLD.fixtures.push({day:d2, home:b, away:a, comp:E.code, stage:"K", round:roundIdx+1, leg:2, tie:ti, played:false, hg:0, ag:0, pens:null});
+  });
+  WORLD.fixtures.sort((a,b)=>a.day-b.day);
+}
+function euroFirstLegOf(fx){
+  return WORLD.fixtures.find(f=>f.comp===fx.comp&&f.stage==="K"&&f.round===fx.round&&f.tie===fx.tie&&f.leg===1&&f.played);
+}
+function euroSeedKnockout(E){
+  const winners=[], runners=[];
+  E.groups.forEach((g,gi)=>{ const t=euroGroupTable(E,gi); winners.push(t[0].id); runners.push(t[1].id); });
+  // 小组第一对其他组第二，尽量避免同组 / 同国
+  let best=null, bestClash=1e9;
+  for(let tries=0;tries<60;tries++){
+    const order=shuffle([...runners]); let clash=0;
+    order.forEach((r,i)=>{ const w=winners[i];
+      if(E.groups[i].includes(r)) clash+=10;
+      if(C(r).nation===C(w).nation && C(r).nation!==EURO_NATION) clash+=1; });
+    if(clash<bestClash){ bestClash=clash; best=order; if(!clash) break; }
+  }
+  const pairs=best.map((r,i)=>[r, winners[i]]);   // 小组第二先主场
+  E.stage="K";
+  E.teams.forEach(id=>{ if(!winners.includes(id)&&!runners.includes(id)) C(id).euro=null; });
+  euroScheduleKO(E, pairs, 0);
+  const u=UC(); if(u.euro===E.code){ const t=pairs.find(p=>p.includes(u.id));
+    if(t) news(`${E.short}淘汰赛抽签`,`${u.cn} 在${E.short}1/8决赛的对手是 ${C(t[0]===u.id?t[1]:t[0]).cn}。`,"info"); }
+}
+function euroResolveRound(E){
+  const r=E.ko.round;
+  const legs=WORLD.fixtures.filter(f=>f.comp===E.code&&f.stage==="K"&&f.round===r+1&&f.played);
+  const res=[]; const winners=[];
+  E.ko.ties.forEach((t,ti)=>{
+    const l1=legs.find(f=>f.tie===ti&&f.leg===1), l2=legs.find(f=>f.tie===ti&&f.leg===2);
+    if(!l1||!l2) return;
+    const ga=l1.hg+l2.ag, gb=l1.ag+l2.hg;    // a 的总进球 / b 的总进球
+    let w;
+    if(ga>gb) w=t.a; else if(gb>ga) w=t.b; else w = l2.pens && l2.pens[0]>l2.pens[1] ? l2.home : l2.away;
+    winners.push(w);
+    res.push({a:t.a,b:t.b,g1:[l1.hg,l1.ag],g2:[l2.hg,l2.ag],agg:[ga,gb],pens:l2.pens,winner:w});
+    const loser = w===t.a? t.b : t.a; C(loser).euro=null;
+  });
+  E.results.push({round:EURO_KO_NAMES[r], ties:res});
+  const pz=EURO_COMPS[E.code].prize, key=["r16","qf","sf"][r];
+  winners.forEach(id=>addMoney(C(id), pz[key], E.short+EURO_KO_NAMES[r+1]+"晋级奖金"));
+  if(r<2){
+    const pairs=[]; const pool=shuffle([...winners]);
+    for(let i=0;i+1<pool.length;i+=2) pairs.push([pool[i],pool[i+1]]);
+    E.ko={round:r+1, ties:pairs.map(([a,b])=>({a,b}))};
+    euroScheduleKO(E, pairs, r+1);
+  } else {
+    // 决赛：单场中立
+    E.ko={round:3, ties:[{a:winners[0],b:winners[1]}]};
+    WORLD.fixtures.push({day:E.finalDay, home:winners[0], away:winners[1], comp:E.code, stage:"K", round:4, leg:1, tie:0, played:false, hg:0, ag:0, pens:null, neutral:true});
+    WORLD.fixtures.sort((a,b)=>a.day-b.day);
+    const u=UC(); if(winners.includes(u.id)) news(`${E.short}决赛！`,`${u.cn} 闯入${E.name}决赛，对手是 ${C(winners.find(i=>i!==u.id)).cn}。`,"good");
+  }
+}
+function euroFinish(E, fx){
+  const w=winnerOf(fx), l= w===fx.home? fx.away : fx.home;
+  E.results.push({round:"决赛", ties:[{a:fx.home,b:fx.away,g1:[fx.hg,fx.ag],pens:fx.pens,winner:w}]});
+  E.winner=w; E.stage="F";
+  const pz=EURO_COMPS[E.code].prize;
+  addMoney(C(w), pz.fin+pz.champ, E.short+"冠军奖金"); addMoney(C(l), pz.fin, E.short+"亚军奖金");
+  C(w).trophies.push(WORLD.season+" "+E.name);
+  C(w).board.conf=clamp(C(w).board.conf+ (E.code==="CL"?40:25),0,100);
+  C(w).euro=null; C(l).euro=null;
+  if(w===WORLD.userClub) news(`${E.name}冠军！！`,`${C(w).cn} 登上欧洲之巅，捧起${E.name}奖杯！`,"good");
+  else news(`${E.name}决赛`,`${C(w).cn} ${fx.hg}-${fx.ag} ${C(l).cn}${fx.pens?`（点球 ${fx.pens[0]}-${fx.pens[1]}）`:""}，${C(w).cn} 夺冠。`,"info");
+}
+// 每日收尾：推进各项杯赛
+function competitionsDayEnd(day){
+  WORLD.cups.forEach(cup=>{
+    if(cup.cur<6 && cup.days[cup.cur]===day){
+      const rem=WORLD.fixtures.some(f=>f.comp==="C"&&f.nation===cup.nation&&f.day===day&&!f.played);
+      if(!rem) advanceCupRound(cup);
+    }
+  });
+  if(!WORLD.euro) return;
+  ["CL","EL"].forEach(code=>{
+    const E=WORLD.euro[code];
+    const rem=WORLD.fixtures.some(f=>f.comp===code&&f.day===day&&!f.played);
+    if(rem) return;
+    if(E.stage==="G" && day===E.gdays[5]) euroSeedKnockout(E);
+    else if(E.stage==="K" && E.ko){
+      if(E.ko.round<3 && day===E.kdays[E.ko.round][1]) euroResolveRound(E);
+      else if(E.ko.round===3 && day===E.finalDay){ const f=WORLD.fixtures.find(f=>f.comp===code&&f.round===4&&f.played); if(f) euroFinish(E,f); }
+    }
+  });
+}
+// 创建比赛时的淘汰赛参数（是否需要点球、总比分基数）
+function knockoutOpts(f){
+  if(f.comp==="C") return {knockout:true, neutral:!!f.neutral};
+  if(EURO_COMPS[f.comp] && f.stage==="K"){
+    if(f.round===4) return {knockout:true, neutral:true};
+    if(f.leg===2){ const l1=euroFirstLegOf(f); return {knockout:true, aggBase: l1? [l1.ag,l1.hg] : [0,0]}; }
+    return {knockout:false};
+  }
+  return {knockout:false, neutral:!!f.neutral};
 }
 
 // ---------- 积分榜 ----------
-function leagueTable(tier){
-  const lg=WORLD.leagues[tier];
+function leagueTable(lgIdx){
+  const lg=WORLD.leagues[lgIdx]; if(!lg) return [];
   const rows=lg.clubIds.map(id=>{ const c=C(id), s=c.seasonStats;
     return {id, ...s, gd:s.gf-s.ga, form:c.form.slice(-5)}; });
   rows.sort((a,b)=> b.pts-a.pts || b.gd-a.gd || b.gf-a.gf || (C(a.id).cn<C(b.id).cn?-1:1));
@@ -1076,8 +1596,8 @@ function leagueTable(tier){
   return rows;
 }
 function clubRank(id){
-  const t=leagueTable(C(id).tier);
-  return t.find(r=>r.id===id).rank;
+  const r=leagueRowOf(C(id));
+  return r? r.rank : "-";
 }
 
 // ---------- 阵容 ----------
@@ -1137,7 +1657,7 @@ function createMatch(homeId, awayId, opts){
   opts=opts||{};
   const M={
     h:homeId, a:awayId, comp:opts.comp||"L", round:opts.round||0, neutral:!!opts.neutral,
-    knockout:!!opts.knockout, record:!!opts.record,
+    knockout:!!opts.knockout, record:!!opts.record, aggBase:opts.aggBase||null,
     t:0, addedTime:0, half:1, done:false,
     score:[0,0], events:[], frames:[], phase:0,
     stats:[blankStats(),blankStats()],
@@ -1584,7 +2104,8 @@ function endMatch(M){
   // 全场最佳
   let best=null; M.teams.forEach(T=>T.men.forEach(m=>{ if(!best||m.rating>best.rating) best=m; }));
   M.motm=best;
-  if(M.knockout && M.score[0]===M.score[1]){
+  const agg0=M.score[0]+(M.aggBase?M.aggBase[0]:0), agg1=M.score[1]+(M.aggBase?M.aggBase[1]:0);
+  if(M.knockout && agg0===agg1){
     // 点球大战
     let p=[0,0];
     for(let i=0;i<5;i++){ if(rnd()<0.75)p[0]++; if(rnd()<0.75)p[1]++; }
@@ -1611,6 +2132,7 @@ function applyResult(fx, M){
   fx.scorers=[[],[]];
   M.events.filter(e=>e.type==="goal").forEach(e=>{});
   const H=C(fx.home), A=C(fx.away);
+  if(EURO_COMPS[fx.comp] && fx.stage==="G" && WORLD.euro && WORLD.euro[fx.comp]) euroApplyGroupResult(WORLD.euro[fx.comp], fx);
   if(fx.comp==="L"){
     [[H,M.score[0],M.score[1]],[A,M.score[1],M.score[0]]].forEach(([c,gf,ga])=>{
       const s=c.seasonStats; s.p++; s.gf+=gf; s.ga+=ga;
@@ -1622,9 +2144,10 @@ function applyResult(fx, M){
   }
   // 上座与收入
   const att0=Math.round(Math.min(H.cap, H.cap*(0.55+H.rep/220+ (H.seasonStats.pts/Math.max(1,H.seasonStats.p))*0.06)));
-  const price = H.tier===0? 42 : H.tier===1? 27 : 19;
-  const gate = Math.round(att0*price*(fx.comp==="C"?0.8:1));
-  addMoney(H, gate, "门票收入 vs "+A.short);
+  const price = ticketPrice(H);
+  const gate = Math.round(att0*price*(fx.comp==="C"?0.8: EURO_COMPS[fx.comp]?1.3 : 1));
+  if(fx.neutral){ addMoney(H, Math.round(gate/2), "决赛门票分成 vs "+A.short); addMoney(A, Math.round(gate/2), "决赛门票分成 vs "+H.short); }
+  else addMoney(H, gate, "门票收入 vs "+A.short);
   fx.attendance=att0;
   // 球员数据结算
   M.teams.forEach((T,side)=>{
@@ -1664,6 +2187,10 @@ function applyResult(fx, M){
   fx.events = M.events.filter(e=>["goal","card","hurt","pen"].includes(e.type)).map(e=>({t:e.t,x:e.text,c:e.cls}));
 }
 
+function ticketPrice(c){
+  const lg=LG(c); if(lg) return lg.price;
+  return c.rep>=70? 30 : 22;
+}
 function addMoney(club, amt, memo){
   club.finance.balance += amt;
   if(amt>0) club.finance.income+=amt; else club.finance.expense-=amt;
@@ -1847,7 +2374,7 @@ function bumpAttr(p,focusList,dir,club){
 // ---------- 董事会 ----------
 function boardReview(){
   WORLD.clubs.forEach(c=>{
-    const t=leagueTable(c.tier), r=t.find(x=>x.id===c.id);
+    const r=leagueRowOf(c);
     if(!r||r.p<4) return;
     const diff = r.rank - c.board.target;      // 正数=低于期望
     const dc = diff<=0? 0.75 : diff<=2? -0.15 : diff<=5? -0.45 : diff<=9? -0.80 : -1.15;
@@ -2042,7 +2569,7 @@ function bigTransferNews(p, from, to, fee){
   if(!WORLD.aiNews || WORLD.aiNews.d!==WORLD.day) WORLD.aiNews={d:WORLD.day,n:0};
   if(WORLD.aiNews.n>=2) return;
   const bar=Math.max(3e6, Math.pow(u.rep,3)*10);
-  const big = fee>=2.5e7 || (to.tier===u.tier && fee>=bar) || (from && from.tier===u.tier && fee>=bar);
+  const big = fee>=2.5e7 || (to.lg===u.lg && fee>=bar) || (from && from.lg===u.lg && fee>=bar);
   if(!big) return;
   WORLD.aiNews.n++;
   news(`转会：${p.cn} 加盟 ${to.cn}`,
@@ -2281,71 +2808,77 @@ function youthIntake(){
 }
 
 // ---------- 赛季结算 ----------
-const PRIZE=[
-  [172e6,104e6],  // 英超：冠军 / 垫底（转播+奖金）
-  [13e6,5.5e6],   // 英冠
-  [2.6e6,1.1e6]   // 英甲
-];
 function endSeason(){
-  const summary={season:WORLD.season, leagues:[], cup:WORLD.cup.winner};
+  const summary={season:WORLD.season, leagues:[], cups:WORLD.cups.map(c=>c.winner),
+                 euro:{CL:WORLD.euro?WORLD.euro.CL.winner:null, EL:WORLD.euro?WORLD.euro.EL.winner:null}};
   const allP=Object.values(WORLD.players).filter(p=>p.apps>0);
   summary.topScorers=allP.slice().sort((a,b)=>b.goals-a.goals||b.assists-a.assists).slice(0,10)
     .map(p=>({n:p.cn,c:p.clubId>=0?C(p.clubId).short:"-",g:p.goals,a:p.assists,ap:p.apps}));
   summary.topRated=allP.filter(p=>p.apps>=15).sort((a,b)=>b.ratingSum/b.apps-a.ratingSum/a.apps).slice(0,10)
     .map(p=>({n:p.cn,c:p.clubId>=0?C(p.clubId).short:"-",r:(p.ratingSum/p.apps).toFixed(2),ap:p.apps}));
+  const tables={};
   WORLD.leagues.forEach(lg=>{
-    const t=leagueTable(lg.tier);
-    summary.leagues.push({tier:lg.tier, table:t.map(r=>({id:r.id,pts:r.pts,gd:r.gd,rank:r.rank}))});
-    const champ=C(t[0].id); champ.trophies.push(WORLD.season+" "+LEAGUE_NAMES[lg.tier]);
+    const t=leagueTable(lg.lg); tables[lg.lg]=t;
+    summary.leagues.push({lg:lg.lg, nation:lg.nation, tier:lg.tier, table:t.map(r=>({id:r.id,pts:r.pts,gd:r.gd,rank:r.rank}))});
+    const champ=C(t[0].id); champ.trophies.push(WORLD.season+" "+lg.name);
+    const n=t.length;
     t.forEach(r=>{
       const c=C(r.id);
-      const [hi,lo]=PRIZE[lg.tier];
-      const money0=Math.round(lo+(hi-lo)*(20-r.rank)/19);
-      addMoney(c, money0, `${LEAGUE_SHORT[lg.tier]}第${r.rank}名奖金/转播分成`);
-      c.lastRank=r.rank;
+      const [hi,lo]=lg.prize;
+      const money0=Math.round(lo+(hi-lo)*(n-r.rank)/(n-1));
+      addMoney(c, money0, `${lg.short}第${r.rank}名奖金/转播分成`);
+      c.lastRank=r.rank; c.lastLg=lg.lg;
     });
   });
-  // 升降级
-  const up=[[],[],[]], down=[[],[],[]];
-  for(let tier=0;tier<3;tier++){
-    const t=leagueTable(tier);
-    if(tier<2){
-      const promoted=[t[t.length-1].id];  // 占位，稍后覆盖
-    }
-  }
+  // 只打欧战的其他欧洲球队：按声望折算其本国联赛的奖金与转播收入
+  WORLD.clubs.filter(c=>c.nation===EURO_NATION).forEach(c=>addMoney(c, Math.round(Math.pow(c.rep,3)*90), `${c.country||"本国"}联赛奖金/转播分成`));
+  // ---- 下赛季欧战资格（按各国顶级联赛排名 + 杯赛冠军）----
+  const qual={CL:[],EL:[]};
+  NATIONS.forEach((nat,ni)=>{
+    const t=tables[lgIndex(ni,0)]; if(!t) return;
+    const ids=t.map(r=>r.id);
+    qual.CL.push(...ids.slice(0,nat.cl));
+    const el=ids.slice(nat.cl, nat.cl+nat.el);
+    const cupW=WORLD.cups[ni].winner;
+    if(cupW!=null && C(cupW).nation===ni && !qual.CL.includes(cupW) && !el.includes(cupW)) el.push(cupW);
+    else el.push(ids[nat.cl+nat.el]);           // 杯赛冠军已获资格 → 名额顺延给联赛下一名
+    qual.EL.push(...el.filter(x=>x!=null));
+  });
+  WORLD.euroQual=qual;
+  // ---- 升降级（各国相邻两级之间：2 队直升 + 附加赛 1 队；3 队降级）----
   const moves=[];
-  for(let tier=0;tier<2;tier++){
-    const lower=leagueTable(tier+1);
-    const upper=leagueTable(tier);
-    const promoted=[lower[0].id, lower[1].id];
-    // 附加赛 3-6 名
-    const po=[lower[2].id,lower[3].id,lower[4].id,lower[5].id];
-    const s1= poGame(po[0],po[3]), s2=poGame(po[1],po[2]);
-    const win=poGame(s1,s2);
-    promoted.push(win);
-    const relegated=[upper[17].id, upper[18].id, upper[19].id];
-    moves.push({tier, promoted, relegated, poWin:win});
-  }
+  NATIONS.forEach((nat,ni)=>{
+    for(let tier=0;tier<nat.tiers.length-1;tier++){
+      const upper=tables[lgIndex(ni,tier)], lower=tables[lgIndex(ni,tier+1)];
+      const promoted=[lower[0].id, lower[1].id];
+      const po=[lower[2].id,lower[3].id,lower[4].id,lower[5].id];
+      const s1=poGame(po[0],po[3]), s2=poGame(po[1],po[2]);
+      const win=poGame(s1,s2);
+      promoted.push(win);
+      const relegated=upper.slice(-3).map(r=>r.id);
+      moves.push({nation:ni, tier, promoted, relegated, poWin:win});
+    }
+  });
   moves.forEach(mv=>{
-    mv.promoted.forEach(id=>{ const c=C(id); c.tier=mv.tier; c.board.conf=clamp(c.board.conf+28,0,100);
-      c.trophies.push(WORLD.season+" 升入"+LEAGUE_SHORT[mv.tier]);
+    const upName=NATIONS[mv.nation].tiers[mv.tier], downName=NATIONS[mv.nation].tiers[mv.tier+1];
+    mv.promoted.forEach(id=>{ const c=C(id); c.tier=mv.tier; c.lg=upName.lg; c.board.conf=clamp(c.board.conf+28,0,100);
+      c.trophies.push(WORLD.season+" 升入"+upName.short);
       if(id===WORLD.userClub) news("升级成功！",
-        `${c.cn} 成功升入 ${LEAGUE_NAMES[mv.tier]}！董事会对你的工作非常满意，下赛季的预算也将大幅提升。`,"good"); });
-    mv.relegated.forEach(id=>{ const c=C(id); c.tier=mv.tier+1; c.board.conf=clamp(c.board.conf-42,0,100);
+        `${c.cn} 成功升入 ${upName.name}！董事会对你的工作非常满意，下赛季的预算也将大幅提升。`,"good"); });
+    mv.relegated.forEach(id=>{ const c=C(id); c.tier=mv.tier+1; c.lg=downName.lg; c.board.conf=clamp(c.board.conf-42,0,100);
       if(id===WORLD.userClub) news("球队降级",
-        `${c.cn} 不幸降入 ${LEAGUE_NAMES[mv.tier+1]}。董事会对此深感失望，你的帅位岌岌可危。`,"bad"); });
+        `${c.cn} 不幸降入 ${downName.name}。董事会对此深感失望，你的帅位岌岌可危。`,"bad"); });
   });
   // 夺冠加成
-  WORLD.leagues.forEach(lg=>{ const t=leagueTable(lg.tier);
+  WORLD.leagues.forEach(lg=>{ const t=tables[lg.lg];
     C(t[0].id).board.conf=clamp(C(t[0].id).board.conf+30,0,100); });
-  if(WORLD.cup.winner!=null) C(WORLD.cup.winner).board.conf=clamp(C(WORLD.cup.winner).board.conf+15,0,100);
   WORLD.history.push(summary);
 
   // 用户战报
   const u=UC();
-  const myT=summary.leagues.find(l=>l.tier===(u.lastTier!=null?u.lastTier:u.tier));
+  const myLg=WORLD.leagues[u.lastLg!=null?u.lastLg:u.lg];
   news(`${WORLD.season} 赛季结束`,
-    `你带领 ${u.cn} 完成了 ${WORLD.season}/${(WORLD.season+1)%100} 赛季，最终排名第 ${u.lastRank} 位。`+
+    `你带领 ${u.cn} 完成了 ${WORLD.season}/${(WORLD.season+1)%100} 赛季，${myLg?myLg.short:""}最终排名第 ${u.lastRank} 位。`+
     (u.trophies.some(t=>t.startsWith(WORLD.season))?" 恭喜夺冠！":""),"info");
 
   // 董事会评估
@@ -2401,9 +2934,6 @@ function endSeason(){
     if(p.ca<42 || p.age>33){ delete WORLD.players[id]; return false; }
     return true;
   });
-  // 自由球员市场容量上限，避免逐年膨胀
-  WORLD.freeAgents.sort((a,b)=>(P(b).ca+(P(b).pa-P(b).ca)*0.5)-(P(a).ca+(P(a).pa-P(a).ca)*0.5));
-  WORLD.freeAgents.splice(150).forEach(id=>{ delete WORLD.players[id]; });
   WORLD.clubs.forEach(c=>{
     const cap = c.id===WORLD.userClub? 30 : 26;   // AI 主动清理冗员，转会市场才有买家
     while(c.squad.length>cap){
@@ -2411,6 +2941,9 @@ function endSeason(){
       c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; WORLD.freeAgents.push(worst.id);
     }
   });
+  // 自由球员市场容量上限，避免逐年膨胀（在各队清理冗员之后执行，只留最好的一批）
+  WORLD.freeAgents.sort((a,b)=>(P(b).ca+(P(b).pa-P(b).ca)*0.5)-(P(a).ca+(P(a).pa-P(a).ca)*0.5));
+  WORLD.freeAgents.splice(220).forEach(id=>{ delete WORLD.players[id]; });
   // 清理关注名单里已不存在的球员（退役 / 自由市场清理）
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
@@ -2451,15 +2984,11 @@ function simDay(day, skipUser){
   fx.forEach(f=>{
     if(skipUser && (f.home===WORLD.userClub||f.away===WORLD.userClub)) return;
     [f.home,f.away].forEach(id=>{ const c=C(id); if(c.id!==WORLD.userClub) autoPickLineup(c); });
-    const M=runMatch(createMatch(f.home,f.away,{comp:f.comp, round:f.round,
-       knockout:f.comp==="C", record:false}));
+    const M=runMatch(createMatch(f.home,f.away,{comp:f.comp, round:f.round, record:false, ...knockoutOpts(f)}));
     applyResult(f,M);
   });
-  // 杯赛轮次推进
-  if(WORLD.cup.cur<6 && WORLD.cup.days[WORLD.cup.cur]===day){
-    const rem=WORLD.fixtures.filter(f=>f.comp==="C"&&f.day===day&&!f.played);
-    if(!rem.length) advanceCupRound();
-  }
+  // 杯赛 / 欧战轮次推进
+  competitionsDayEnd(day);
 }
 
 function processDayEnd(day){
@@ -2559,7 +3088,7 @@ const NAV=[
   ["组织",[["home","🏠","总览"],["inbox","✉","收件箱"],["schedule","📅","赛程"]]],
   ["球队",[["squad","👥","阵容"],["tactics","⚽","战术"],["training","🏃","训练"],["youth","🌱","青训"]]],
   ["运营",[["transfer","💱","转会"],["scout","🔍","球探"],["finance","💷","财政"],["build","🏗","建设"],["club","🏟","俱乐部"]]],
-  ["世界",[["league","🏆","联赛"],["stats","📊","数据"],["history","📜","历史"]]],
+  ["世界",[["league","🏆","赛事"],["stats","📊","数据"],["history","📜","历史"]]],
   ["系统",[["save","💾","存档"],["crests","🛡","队徽"],["help","❓","玩法说明"]]]
 ];
 function renderNav(){
@@ -2581,7 +3110,7 @@ function go(v){ VIEW=v; SORT={k:null,d:1}; render(); }
 function renderTop(){
   const c=UC();
   $("#tb-crest").innerHTML=`<img src="${crestURI(c)}" width="34" height="34" alt="">`;
-  $("#tb-club").innerHTML=`${esc(c.cn)}<small>${LEAGUE_SHORT[c.tier]} · ${WORLD.season}/${String(WORLD.season+1).slice(2)}</small>`;
+  $("#tb-club").innerHTML=`${esc(c.cn)}<small>${LGS(c)}${c.euro?" · "+EURO_COMPS[c.euro].short:""} · ${WORLD.season}/${String(WORLD.season+1).slice(2)}</small>`;
   $("#tb-date").textContent=fmtDateShort(dateOf(WORLD.day));
   const r=clubRank(c.id);
   $("#tb-pos").textContent=r+"位";
@@ -2610,7 +3139,7 @@ function makeTable(cols, rows, opts){
   const t=el("table");
   const thead=el("thead"); const tr=el("tr");
   cols.forEach(c=>{
-    const th=el("th",c.nos?"nos":"",c.h);
+    const th=el("th",(c.nos?"nos":"")+(c.mh?" mh":""),c.h);
     if(c.cls) th.style.textAlign=c.cls==="num"?"right":c.cls==="ctr"?"center":"left";
     if(!c.nos) th.onclick=()=>{ if(SORT.k===c.k) SORT.d*=-1; else {SORT.k=c.k;SORT.d=c.desc===false?1:-1;} opts.rerender?opts.rerender():render(); };
     if(SORT.k===c.k) th.innerHTML=c.h+(SORT.d<0?" ▾":" ▴");
@@ -2626,7 +3155,7 @@ function makeTable(cols, rows, opts){
   }
   data.forEach((r,i)=>{
     const row=el("tr",opts.onRow?"clickable":"");
-    cols.forEach(c=>{ const td=el("td",c.cls||"",c.r(r,i)); row.appendChild(td); });
+    cols.forEach(c=>{ const td=el("td",(c.cls||"")+(c.mh?" mh":""),c.r(r,i)); row.appendChild(td); });
     if(opts.onRow) row.onclick=()=>opts.onRow(r);
     if(opts.rowStyle) opts.rowStyle(row,r,i);
     tb.appendChild(row);
@@ -2638,12 +3167,12 @@ function makeTable(cols, rows, opts){
 
 /* ================= 总览 ================= */
 function vHome(v){
-  const c=UC(), tbl=leagueTable(c.tier), me=tbl.find(r=>r.id===c.id);
-  v.appendChild(el("div","",`<h1>${esc(c.cn)}</h1><div class="sub">${esc(c.stadium)} · ${LEAGUE_NAMES[c.tier]} · ${fmtDate(dateOf(WORLD.day))}</div>`));
+  const c=UC(), tbl=leagueTable(c.lg), me=tbl.find(r=>r.id===c.id)||{rank:"-",pts:0,p:0,gf:0,ga:0};
+  v.appendChild(el("div","",`<h1>${esc(c.cn)}</h1><div class="sub">${esc(c.stadium)} · ${LGN(c)}${c.euro?" · "+EURO_COMPS[c.euro].name:""} · ${fmtDate(dateOf(WORLD.day))}</div>`));
 
   const g=el("div","grid4");
   const cards=[
-    ["联赛排名",`${me.rank}<small style="font-size:12px;color:var(--dim)"> / 20</small>`, `${me.pts} 分 · ${me.p} 场`],
+    ["联赛排名",`${me.rank}<small style="font-size:12px;color:var(--dim)"> / ${tbl.length}</small>`, `${me.pts} 分 · ${me.p} 场`],
     ["近期战绩", formHTML(c.form.slice(-5))||"<span class='hint'>暂无</span>", `进 ${me.gf} 失 ${me.ga}`],
     ["董事会信心", `<span style="color:${c.board.conf>60?'#00d47e':c.board.conf>30?'#f0a020':'#e5484d'}">${Math.round(c.board.conf)}%</span>`, esc(c.board.expect)],
     ["转会预算", money(c.finance.transferBudget), "周薪支出 "+money(c.squad.reduce((s,i)=>s+P(i).wage,0))]
@@ -2660,13 +3189,13 @@ function vHome(v){
   if(nf){
     const opp=C(nf.home===c.id?nf.away:nf.home);
     const home=nf.home===c.id;
-    const ot=leagueTable(opp.tier).find(r=>r.id===opp.id);
-    c1.innerHTML=`<h3>下一场比赛 <span class="tag t-i">${nf.comp==="L"?LEAGUE_SHORT[nf.tier]+" 第"+nf.round+"轮":CUP_NAME+" "+WORLD.cup.roundNames[nf.round-1]}</span></h3>
+    const ot=leagueRowOf(opp);
+    c1.innerHTML=`<h3>下一场比赛 <span class="tag ${compTagCls(nf)}">${compLabel(nf)}</span></h3>
       <div style="display:flex;align-items:center;gap:14px;padding:8px 0">
         ${crestHTML(opp,44)}
         <div><div style="font-size:16px;font-weight:700">${home?"主场对阵":"客场挑战"} ${esc(opp.cn)}</div>
         <div class="hint">${fmtDate(dateOf(nf.day))} · ${esc(home?c.stadium:opp.stadium)}</div>
-        <div class="hint">对手联赛第 ${ot.rank} 位 · 近况 ${formHTML(opp.form.slice(-5))||"—"}</div></div>
+        <div class="hint">${ot?`对手${LGS(opp)}第 ${ot.rank} 位`:`来自${esc(opp.country||"欧洲")}`} · 近况 ${formHTML(opp.form.slice(-5))||"—"}</div></div>
       </div>`;
   } else c1.innerHTML=`<h3>赛季已结束</h3><div class="hint">点击「继续」进入下赛季</div>`;
   row.appendChild(c1);
@@ -2753,9 +3282,9 @@ function vSquad(v){
   const card=el("div","card");
   card.appendChild(makeTable([
     {h:"",k:"st",nos:true,cls:"ctr",r:p=>inXI(p.id)?'<span class="tag t-ok">首发</span>':inSub(p.id)?'<span class="tag t-i">替补</span>':''},
-    {h:"姓名",k:"n",v:p=>p.cn,r:p=>`<b>${esc(p.cn)}</b>${p.homegrown?' <span class="hint">◆</span>':''}<div class="hint" style="font-size:10px">${esc(p.name)}</div>`},
-    {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${p.pos2.length?`<span class="hint" style="font-size:10px"> ${p.pos2.map(x=>POS_CN[x]).join("/")}</span>`:""}`},
-    {h:"年龄",k:"age",cls:"num",v:p=>p.age,r:p=>p.age},
+    {h:"姓名",k:"n",v:p=>p.cn,r:p=>`<b>${esc(p.cn)}</b>${p.homegrown?' <span class="hint">◆</span>':''}<div class="hint en-sub" style="font-size:10px">${esc(p.name)}</div>`},
+    {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${p.pos2.length?`<span class="hint pos2" style="font-size:10px"> ${p.pos2.map(x=>POS_CN[x]).join("/")}</span>`:""}`},
+    {h:"年龄",k:"age",cls:"num",mh:true,v:p=>p.age,r:p=>p.age},
     {h:"能力",k:"ca",cls:"num",v:p=>p.ca,r:p=>`<b style="color:${caColor(p.ca)}">${ovr(p)}</b>`},
     {h:"潜力",k:"pa",cls:"num",v:p=>p.pa,r:p=>`<span style="color:${caColor(p.pa)};opacity:.75">${Math.round(p.pa/2)}</span>`},
     {h:"状态",k:"cond",cls:"ctr",v:p=>p.condition,r:p=>condTag(p)},
@@ -3038,7 +3567,7 @@ function vTransfer(v){
       const left=Math.max(0,(of.until!=null?of.until:of.day+7)-WORLD.day);
       const att = b.rep>c.rep+8?'<span class="tag t-w">球员渴望加盟</span>': b.rep>=c.rep-3?'<span class="tag t-n">球员愿意考虑</span>':'<span class="tag t-n">球员有些犹豫</span>';
       const d=el("div"); d.style.cssText="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1d242e;flex-wrap:wrap";
-      d.innerHTML=`${crestHTML(b)}<b>${esc(b.cn)}</b><span class="tag t-n">${LEAGUE_SHORT[b.tier]}</span>
+      d.innerHTML=`${crestHTML(b)}<b>${esc(b.cn)}</b><span class="tag t-n">${LGS(b)}</span>
         <span class="hint">报价</span><b style="cursor:pointer" onclick="showPlayer(${p.id})">${esc(p.cn)}</b>
         <span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${perfTag(p)}${att}${of.final?'<span class="tag t-w">最终报价</span>':''}
         <span style="flex:1"></span>
@@ -3081,7 +3610,7 @@ function vTransfer(v){
   const f=el("div"); f.style.cssText="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px";
   f.innerHTML=`
     <div><label>位置</label><select id="f-pos"><option value="">全部</option>${POSITIONS.map(p=>`<option value="${p}" ${TFILTER.pos===p?"selected":""}>${POS_CN[p]}</option>`).join("")}</select></div>
-    <div><label>联赛</label><select id="f-tier"><option value="">全部</option>${LEAGUE_SHORT.map((n,i)=>`<option value="${i}" ${TFILTER.tier==i?"selected":""}>${n}</option>`).join("")}<option value="fa" ${TFILTER.tier==="fa"?"selected":""}>自由球员</option></select></div>
+    <div><label>联赛</label><select id="f-tier"><option value="">全部</option>${WORLD.leagues.map((l,i)=>`<option value="${i}" ${String(TFILTER.tier)===String(i)?"selected":""}>${l.short}</option>`).join("")}<option value="eu" ${TFILTER.tier==="eu"?"selected":""}>欧洲其他</option><option value="fa" ${TFILTER.tier==="fa"?"selected":""}>自由球员</option></select></div>
     <div><label>最高要价 ${TFILTER.maxFee?money(TFILTER.maxFee):"不限"}</label><input id="f-fee" type="range" min="0" max="150" value="${TFILTER.maxFee/1e6}" style="width:130px"></div>
     <div><label>最低能力 ${TFILTER.minCa||"不限"}</label><input id="f-ca" type="range" min="0" max="100" value="${TFILTER.minCa}" style="width:110px"></div>
     <div><label>最大年龄 ${TFILTER.maxAge}</label><input id="f-age" type="range" min="16" max="40" value="${TFILTER.maxAge}" style="width:100px"></div>
@@ -3091,7 +3620,8 @@ function vTransfer(v){
   let pool=Object.values(WORLD.players).filter(p=>p.clubId!==WORLD.userClub);
   if(TFILTER.pos) pool=pool.filter(p=>p.pos===TFILTER.pos||p.pos2.includes(TFILTER.pos));
   if(TFILTER.tier==="fa") pool=pool.filter(p=>p.clubId<0);
-  else if(TFILTER.tier!=="") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).tier==TFILTER.tier);
+  else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).nation===EURO_NATION);
+  else if(TFILTER.tier!=="") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).lg==TFILTER.tier);
   if(TFILTER.minCa) pool=pool.filter(p=>ovr(p)>=TFILTER.minCa);
   pool=pool.filter(p=>p.age<=TFILTER.maxAge);
   if(TFILTER.maxFee) pool=pool.filter(p=>askingPrice(p)<=TFILTER.maxFee);
@@ -3252,7 +3782,7 @@ function vScout(v){
 function vFinance(v){
   const c=UC(), f=c.finance;
   const wk=c.squad.reduce((s,i)=>s+P(i).wage,0);
-  v.appendChild(el("div","",`<h1>财政</h1><div class="sub">${LEAGUE_NAMES[c.tier]} · ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季</div>`));
+  v.appendChild(el("div","",`<h1>财政</h1><div class="sub">${LGN(c)} · ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季</div>`));
   const g=el("div","grid4");
   [["银行余额",money(f.balance),f.balance<0?"警告：透支":"可用现金"],
    ["转会预算",money(f.transferBudget),"董事会核定"],
@@ -3358,7 +3888,7 @@ function vBuild(v){
       <div><div class="hint">当前容量</div><div class="big">${c.cap.toLocaleString()}</div></div>
       <div><div class="hint">本季主场平均上座</div><div class="big">${occ?occ.avg.toLocaleString():"-"}</div></div>
       <div><div class="hint">上座率</div><div class="big" style="color:${occ&&occ.pct>=0.97?'#00d47e':occ&&occ.pct<0.85?'#f0a020':''}">${occ?(occ.pct*100).toFixed(0)+"%":"-"}</div></div>
-      <div><div class="hint">票价</div><div class="big">£${c.tier===0?42:c.tier===1?27:19}</div></div>
+      <div><div class="hint">票价</div><div class="big">£${ticketPrice(c)}</div></div>
     </div>
     <div class="hint" style="margin-bottom:10px">${!occ?"本赛季还没有主场比赛数据，可参考上季表现决定是否扩建。":occ.pct>=0.97?"几乎场场满座，扩建能直接转化为门票收入。":occ.pct<0.85?"上座率偏低，扩建的回报有限——先把成绩和声望做上去。":"上座率尚可，扩建后需要靓丽战绩来填满新看台。"}
     容量上限 ${STADIUM_MAX.toLocaleString()} 座；竣工后声望 +1。</div>`;
@@ -3368,7 +3898,7 @@ function vBuild(v){
     const can=!busyS&&!over&&c.finance.balance>=cost;
     const o=el("div","card",`<div class="hint">新增座位</div><div class="big">+${seats.toLocaleString()}</div>
       <div style="margin:6px 0 2px;color:${c.finance.balance>=cost?'':'#e5484d'}">${money(cost)}</div>
-      <div class="hint" style="margin-bottom:8px">工期 ${days} 天 · 每年多收约 ${money(seats*(c.tier===0?42:c.tier===1?27:19)*19)}</div>
+      <div class="hint" style="margin-bottom:8px">工期 ${days} 天 · 每年多收约 ${money(seats*ticketPrice(c)*19)}</div>
       <button class="sm" ${can?"":"disabled"}>${busyS?"扩建中":over?"超出上限":"开始扩建"}</button>`);
     o.style.cssText="flex:1 1 160px;margin:0";
     o.querySelector("button").onclick=()=>confirmBuild("球场扩建",
@@ -3388,7 +3918,7 @@ function vClub(v){
   const g=el("div","grid2");
   g.appendChild(el("div","card",`<h3>俱乐部信息</h3>
     <table style="font-size:12px">
-    <tr><td class="hint">所属联赛</td><td>${LEAGUE_NAMES[c.tier]}</td></tr>
+    <tr><td class="hint">所属联赛</td><td>${LGN(c)}${c.euro?" · "+EURO_COMPS[c.euro].name:""}</td></tr>
     <tr><td class="hint">球场</td><td>${esc(c.stadium)}（${c.cap.toLocaleString()} 座）</td></tr>
     <tr><td class="hint">俱乐部声望</td><td>${c.rep}/100 ${barHTML(c.rep,100,"#4a9eff")}</td></tr>
     <tr><td class="hint">董事会期望</td><td>${esc(c.board.expect)}</td></tr>
@@ -3408,37 +3938,54 @@ function vClub(v){
   v.appendChild(t);
 }
 
-/* ================= 联赛 ================= */
-let LGTIER=null;
+/* ================= 联赛 / 杯赛 / 欧战 ================= */
+let LGNATION=null, LGTIER=0, EUROTAB="CL";
 function vLeague(v){
-  if(LGTIER==null) LGTIER=UC().tier;
-  v.appendChild(el("div","",`<h1>联赛</h1>`));
-  const bar=el("div"); bar.style.marginBottom="10px";
-  LEAGUE_SHORT.forEach((n,i)=>{ const b=el("button","sm"+(LGTIER===i?" on":""),n);
-    b.style.marginRight="6px"; b.onclick=()=>{LGTIER=i;render();}; bar.appendChild(b); });
+  const u=UC();
+  if(LGNATION==null){ LGNATION = u.nation===EURO_NATION? "EU" : u.nation; LGTIER=u.tier||0; }
+  v.appendChild(el("div","",`<h1>赛事</h1>`));
+  // 国家页签
+  const bar=el("div","segbar"); bar.style.cssText="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px";
+  NATIONS.forEach((n,i)=>{ const b=el("button","sm"+(LGNATION===i?" on":""),n.name);
+    b.onclick=()=>{LGNATION=i; LGTIER=Math.min(LGTIER,n.tiers.length-1); render();}; bar.appendChild(b); });
+  { const b=el("button","sm"+(LGNATION==="EU"?" on":""),"欧战"); b.onclick=()=>{LGNATION="EU";render();}; bar.appendChild(b); }
   v.appendChild(bar);
-  const tbl=leagueTable(LGTIER);
-  const card=el("div","card"); card.innerHTML=`<h3>${LEAGUE_NAMES[LGTIER]} 积分榜</h3>`;
+  if(LGNATION==="EU"){ vEuro(v); return; }
+
+  const nat=NATIONS[LGNATION];
+  const bar2=el("div","segbar"); bar2.style.cssText="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px";
+  nat.tiers.forEach((t,i)=>{ const b=el("button","sm"+(LGTIER===i?" on":""),t.short);
+    b.onclick=()=>{LGTIER=i;render();}; bar2.appendChild(b); });
+  v.appendChild(bar2);
+  const lgIdx=lgIndex(LGNATION,LGTIER), lg=WORLD.leagues[lgIdx];
+  const tbl=leagueTable(lgIdx), n=tbl.length, top=LGTIER===0, bottom=LGTIER===nat.tiers.length-1;
+  const card=el("div","card"); card.innerHTML=`<h3>${lg.name} 积分榜</h3>`;
   card.appendChild(makeTable([
     {h:"#",k:"rank",cls:"num",v:r=>r.rank,desc:false,r:r=>r.rank},
-    {h:"球队",k:"n",v:r=>C(r.id).cn,r:r=>crestHTML(C(r.id))+esc(C(r.id).cn)},
-    {h:"场",k:"p",cls:"num",v:r=>r.p,r:r=>r.p},{h:"胜",k:"w",cls:"num",v:r=>r.w,r:r=>r.w},
-    {h:"平",k:"d",cls:"num",v:r=>r.d,r:r=>r.d},{h:"负",k:"l",cls:"num",v:r=>r.l,r:r=>r.l},
-    {h:"进",k:"gf",cls:"num",v:r=>r.gf,r:r=>r.gf},{h:"失",k:"ga",cls:"num",v:r=>r.ga,r:r=>r.ga},
+    {h:"球队",k:"n",v:r=>C(r.id).cn,r:r=>crestHTML(C(r.id))+esc(C(r.id).cn)+(C(r.id).euro?` <span class="tag t-eu" style="font-size:9px">${EURO_COMPS[C(r.id).euro].short}</span>`:"")},
+    {h:"场",k:"p",cls:"num",v:r=>r.p,r:r=>r.p},{h:"胜",k:"w",cls:"num",mh:true,v:r=>r.w,r:r=>r.w},
+    {h:"平",k:"d",cls:"num",mh:true,v:r=>r.d,r:r=>r.d},{h:"负",k:"l",cls:"num",mh:true,v:r=>r.l,r:r=>r.l},
+    {h:"进",k:"gf",cls:"num",mh:true,v:r=>r.gf,r:r=>r.gf},{h:"失",k:"ga",cls:"num",mh:true,v:r=>r.ga,r:r=>r.ga},
     {h:"净",k:"gd",cls:"num",v:r=>r.gd,r:r=>(r.gd>0?"+":"")+r.gd},
     {h:"积分",k:"pts",cls:"num",v:r=>r.pts,r:r=>`<b>${r.pts}</b>`},
     {h:"近况",k:"f",nos:true,r:r=>formHTML(r.form)}
   ], tbl, {onRow:r=>showClub(r.id), rowStyle:(row,r)=>{
       if(r.id===WORLD.userClub) row.style.background="#16301f";
-      if(r.rank<=(LGTIER===0?4:2)) row.style.borderLeft="3px solid #00d47e";
-      else if(LGTIER>0&&r.rank<=6) row.style.borderLeft="3px solid #4a9eff";
-      if(r.rank>=18&&LGTIER<2) row.style.borderLeft="3px solid #e5484d";
+      if(top){
+        if(r.rank<=nat.cl) row.style.borderLeft="3px solid #00d47e";
+        else if(r.rank<=nat.cl+nat.el) row.style.borderLeft="3px solid #f0a020";
+      } else {
+        if(r.rank<=2) row.style.borderLeft="3px solid #00d47e";
+        else if(r.rank<=6) row.style.borderLeft="3px solid #4a9eff";
+      }
+      if(!bottom && r.rank>n-3) row.style.borderLeft="3px solid #e5484d";
     }}));
-  card.appendChild(el("div","hint",LGTIER===0?"绿：欧战资格　红：降级区":LGTIER<2?"绿：直接升级　蓝：附加赛　红：降级区":"绿：直接升级　蓝：附加赛"));
+  card.appendChild(el("div","hint", top? "绿：欧冠资格　橙：欧联资格（另一席给杯赛冠军）　红：降级区"
+                                     : bottom? "绿：直接升级　蓝：附加赛" : "绿：直接升级　蓝：附加赛　红：降级区"));
   v.appendChild(card);
 
   // 本轮赛果
-  const played=WORLD.fixtures.filter(f=>f.comp==="L"&&f.tier===LGTIER&&f.played).sort((a,b)=>b.day-a.day);
+  const played=WORLD.fixtures.filter(f=>f.comp==="L"&&f.lg===lgIdx&&f.played).sort((a,b)=>b.day-a.day);
   const lastRound=played.length?played[0].round:0;
   const r=el("div","card"); r.innerHTML=`<h3>第 ${lastRound} 轮赛果</h3>`;
   const rr=played.filter(f=>f.round===lastRound);
@@ -3446,18 +3993,71 @@ function vLeague(v){
   rr.forEach(f=>r.appendChild(fixtureRow(f)));
   v.appendChild(r);
 
-  // 杯赛
-  const cup=el("div","card"); cup.innerHTML=`<h3>${CUP_NAME}</h3>`;
-  if(WORLD.cup.winner) cup.appendChild(el("div","",`<div style="margin-bottom:8px">🏆 冠军：<b>${esc(C(WORLD.cup.winner).cn)}</b></div>`));
-  const cr=WORLD.cup.results.slice(-2);
-  if(!cr.length) cup.appendChild(el("div","hint","第三轮尚未开始"));
+  // 国内杯赛
+  const cupObj=WORLD.cups[LGNATION];
+  const cup=el("div","card"); cup.innerHTML=`<h3>${cupObj.name}</h3>`;
+  if(cupObj.winner!=null) cup.appendChild(el("div","",`<div style="margin-bottom:8px">🏆 冠军：<b>${esc(C(cupObj.winner).cn)}</b></div>`));
+  else { const nx=WORLD.fixtures.find(f=>f.comp==="C"&&f.nation===LGNATION&&!f.played);
+    if(nx) cup.appendChild(el("div","hint",`下一轮：${cupObj.roundNames[nx.round-1]} · ${fmtDate(dateOf(nx.day))} · ${cupObj.alive.length} 队在争`)); }
+  const cr=cupObj.results.slice(-2);
+  if(!cr.length) cup.appendChild(el("div","hint","首轮尚未开始"));
   cr.forEach(rd=>{
     cup.appendChild(el("div","hint",`<b style="color:var(--txt)">${rd.round}</b>`));
-    rd.matches.forEach(m=>cup.appendChild(el("div","",`<div style="font-size:12px;padding:2px 0">
+    const wrap=el("div"); wrap.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:2px 14px";
+    rd.matches.forEach(m=>wrap.appendChild(el("div","",`<div style="font-size:12px;padding:2px 0">
       ${crestHTML(C(m.h))}${esc(C(m.h).short)} <b>${m.hg} - ${m.ag}</b> ${crestHTML(C(m.a))}${esc(C(m.a).short)}
       ${m.pens?`<span class="hint">(点球 ${m.pens[0]}-${m.pens[1]})</span>`:""}</div>`)));
+    cup.appendChild(wrap);
   });
   v.appendChild(cup);
+}
+function vEuro(v){
+  const bar=el("div"); bar.style.cssText="margin-bottom:10px;display:flex;gap:6px";
+  ["CL","EL"].forEach(code=>{ const b=el("button","sm"+(EUROTAB===code?" on":""),EURO_COMPS[code].short);
+    b.onclick=()=>{EUROTAB=code;render();}; bar.appendChild(b); });
+  v.appendChild(bar);
+  const E=WORLD.euro&&WORLD.euro[EUROTAB]; if(!E){ v.appendChild(el("div","card",'<div class="empty">本赛季尚未安排</div>')); return; }
+  const head=el("div","card");
+  head.innerHTML=`<h3>${E.name}</h3>`+(E.winner!=null?`<div>🏆 冠军：<b>${esc(C(E.winner).cn)}</b></div>`
+    :`<div class="hint">${E.stage==="G"?"小组赛进行中":"淘汰赛进行中"} · 参赛 ${E.teams.length} 队</div>`);
+  v.appendChild(head);
+  // 淘汰赛结果（倒序）
+  if(E.results.length){
+    const k=el("div","card"); k.innerHTML="<h3>淘汰赛</h3>";
+    E.results.slice().reverse().forEach(rd=>{
+      k.appendChild(el("div","hint",`<b style="color:var(--txt)">${rd.round}</b>`));
+      const wrap=el("div"); wrap.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 14px";
+      rd.ties.forEach(t=>{
+        const wa=t.winner===t.a;
+        wrap.appendChild(el("div","",`<div style="font-size:12px;padding:3px 0">
+          <span style="${wa?'font-weight:700':''}">${crestHTML(C(t.a))}${esc(C(t.a).short)}</span>
+          <b style="background:#0b0f14;padding:1px 7px;border-radius:4px">${t.agg?t.agg[0]+" - "+t.agg[1]:t.g1[0]+" - "+t.g1[1]}</b>
+          <span style="${!wa?'font-weight:700':''}">${crestHTML(C(t.b))}${esc(C(t.b).short)}</span>
+          <span class="hint">${t.g2?`（${t.g1[0]}-${t.g1[1]}，${t.g2[0]}-${t.g2[1]}）`:""}${t.pens?` 点球 ${t.pens[0]}-${t.pens[1]}`:""}</span></div>`));
+      });
+      k.appendChild(wrap);
+    });
+    v.appendChild(k);
+  }
+  // 即将进行的淘汰赛
+  if(E.stage==="K" && E.winner==null){
+    const up=WORLD.fixtures.filter(f=>f.comp===E.code&&f.stage==="K"&&!f.played).sort((a,b)=>a.day-b.day);
+    if(up.length){ const c=el("div","card"); c.innerHTML=`<h3>${EURO_KO_NAMES[up[0].round-1]} 对阵</h3>`;
+      const seen=new Set();
+      up.forEach(f=>{ if(seen.has(f.tie)) return; seen.add(f.tie);
+        c.appendChild(el("div","",`<div style="font-size:12px;padding:3px 0">${crestHTML(C(f.home))}${esc(C(f.home).cn)} <span class="hint">vs</span> ${crestHTML(C(f.away))}${esc(C(f.away).cn)} <span class="hint">· ${fmtDateShort(dateOf(f.day))}${f.round<4?" 首回合":""}</span></div>`)); });
+      v.appendChild(c); }
+  }
+  // 小组积分榜
+  const g=el("div"); g.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px";
+  E.groups.forEach((grp,gi)=>{
+    const t=euroGroupTable(E,gi);
+    const c=el("div","card"); c.innerHTML=`<h3>${String.fromCharCode(65+gi)} 组</h3>`;
+    c.innerHTML+=`<table style="font-size:12px"><thead><tr><th>球队</th><th class="num">场</th><th class="num">净</th><th class="num">分</th></tr></thead><tbody>`+
+      t.map(r=>`<tr style="${r.id===WORLD.userClub?'background:#16301f':''};${r.rank<=2?'border-left:3px solid #00d47e':''}"><td>${crestHTML(C(r.id))}${esc(C(r.id).short)}</td><td class="num">${r.p}</td><td class="num">${(r.gd>0?"+":"")+r.gd}</td><td class="num"><b>${r.pts}</b></td></tr>`).join("")+`</tbody></table>`;
+    g.appendChild(c);
+  });
+  v.appendChild(g);
 }
 function fixtureRow(f){
   const d=el("div","clickable");
@@ -3479,7 +4079,7 @@ function showMatchReport(f){
     ["角球",s[0].corners,s[1].corners],["犯规",s[0].fouls,s[1].fouls],["黄牌",s[0].yellow,s[1].yellow],["红牌",s[0].red,s[1].red]]
     .map(([n,a,b])=>`<tr><td class="num" style="width:70px"><b>${a}</b></td><td class="ctr hint">${n}</td><td style="width:70px"><b>${b}</b></td></tr>`).join("");
   openModal(`${esc(C(f.home).cn)} ${f.hg} - ${f.ag} ${esc(C(f.away).cn)}`,
-    `<div class="hint" style="margin-bottom:10px">${fmtDate(dateOf(f.day))} · ${f.comp==="L"?LEAGUE_SHORT[f.tier]+" 第"+f.round+"轮":CUP_NAME}
+    `<div class="hint" style="margin-bottom:10px">${fmtDate(dateOf(f.day))} · ${compLabel(f)}
       ${f.attendance?" · 观众 "+f.attendance.toLocaleString():""}
       ${f.motm&&P(f.motm)?" · 全场最佳 "+esc(P(f.motm).cn):""}</div>
      <div class="row"><div class="col tw"><table>${rowsHtml}</table></div>
@@ -3488,11 +4088,11 @@ function showMatchReport(f){
      </div></div>`);
 }
 function showClub(id){
-  const c=C(id), t=leagueTable(c.tier).find(r=>r.id===id);
+  const c=C(id), t=leagueRowOf(c);
   const sq=c.squad.map(i=>P(i)).sort((a,b)=>b.ca-a.ca);
   openModal(crestHTML(c,22)+esc(c.cn),
     `<div class="hint" style="margin-bottom:10px">${esc(c.stadium)}（${c.cap.toLocaleString()}）· 声望 ${c.rep} ·
-      ${LEAGUE_SHORT[c.tier]}第 ${t.rank} 位 · ${t.pts} 分 · 近况 ${formHTML(c.form.slice(-5))}</div>
+      ${t?`${LGS(c)}第 ${t.rank} 位 · ${t.pts} 分`:esc(c.country||"欧洲")+"球队"}${c.euro?" · "+EURO_COMPS[c.euro].short:""} · 近况 ${formHTML(c.form.slice(-5))}</div>
      <div class="scroll tw"><table><thead><tr><th>姓名</th><th>位置</th><th class="num">年龄</th><th class="num">能力</th><th class="num">出场</th><th class="num">进球</th><th class="num">身价</th></tr></thead>
      <tbody>${sq.map(p=>`<tr><td>${esc(p.cn)}</td><td><span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span></td>
        <td class="num">${p.age}</td><td class="num"><b style="color:${caColor(p.ca)}">${ovr(p)}</b></td>
@@ -3520,7 +4120,7 @@ function vSchedule(v){
       res=`<b style="color:${w}">${my} - ${th}</b>`;
     } else res=`<span class="hint">${dt.getDate()}日</span>`;
     d.innerHTML=`<span class="hint" style="width:44px">${fmtDateShort(dt)}</span>
-      <span class="tag ${f.comp==="L"?"t-i":"t-w"}">${f.comp==="L"?LEAGUE_SHORT[f.tier]:CUP_NAME}</span>
+      <span class="tag ${compTagCls(f)}" title="${compLabel(f)}">${compShort(f)}</span>
       <span class="tag t-n">${home?"主":"客"}</span>
       ${crestHTML(opp)}<span style="flex:1">${esc(opp.cn)}</span>${res}`;
     if(f.played){ d.style.cursor="pointer"; d.onclick=()=>showMatchReport(f); }
@@ -3555,20 +4155,35 @@ function vStats(v){
 }
 
 /* ================= 历史 ================= */
+function seasonSummaryHTML(h, brief){
+  const u=UC();
+  let inner="";
+  // 我的联赛
+  const mine=h.leagues.find(l=>l.lg===(u.lastLg!=null?u.lastLg:u.lg)) || h.leagues[0];
+  if(mine){
+    const lg=LEAGUE_DEFS[mine.lg];
+    inner+=`<div style="font-weight:700;margin-bottom:4px">${lg?lg.name:""}</div>`;
+    mine.table.slice(0,brief?4:6).forEach(r=>{ inner+=`<div style="font-size:12px;padding:1px 0">${r.rank}. ${crestHTML(C(r.id))}${esc(C(r.id).cn)} <span class="hint">${r.pts}分</span></div>`; });
+    const me=mine.table.find(r=>r.id===u.id); if(me && me.rank>(brief?4:6)) inner+=`<div style="font-size:12px;padding:1px 0">${me.rank}. ${crestHTML(u)}${esc(u.cn)} <span class="hint">${me.pts}分</span></div>`;
+  }
+  inner+=`<div class="hr"></div><div style="font-weight:700;margin-bottom:4px">各国冠军</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:2px 12px">`;
+  NATIONS.forEach((nat,ni)=>{
+    const top=h.leagues.find(l=>l.nation===ni&&l.tier===0);
+    const champ=top&&top.table[0]? C(top.table[0].id) : null;
+    const cupW=h.cups&&h.cups[ni]!=null? C(h.cups[ni]) : null;
+    inner+=`<div style="font-size:12px;padding:1px 0">${nat.tiers[0].short}：${champ?crestHTML(champ)+esc(champ.cn):"—"}　<span class="hint">${nat.cup}：</span>${cupW?crestHTML(cupW)+esc(cupW.cn):"—"}</div>`;
+  });
+  inner+=`</div>`;
+  if(h.euro) inner+=`<div class="hr"></div><div style="font-size:12px">🏆 欧冠冠军：<b>${h.euro.CL!=null?crestHTML(C(h.euro.CL))+esc(C(h.euro.CL).cn):"—"}</b>　🏆 欧联冠军：<b>${h.euro.EL!=null?crestHTML(C(h.euro.EL))+esc(C(h.euro.EL).cn):"—"}</b></div>`;
+  return inner;
+}
 function vHistory(v){
   v.appendChild(el("div","",`<h1>历史</h1><div class="sub">共 ${WORLD.history.length} 个完整赛季</div>`));
   if(!WORLD.history.length){ v.appendChild(el("div","card",'<div class="empty">还没有完成任何赛季</div>')); return; }
   WORLD.history.slice().reverse().forEach(h=>{
     const c=el("div","card");
     c.innerHTML=`<h3>${h.season}/${String(h.season+1).slice(2)} 赛季</h3>`;
-    let inner='<div class="row">';
-    h.leagues.forEach(l=>{
-      inner+=`<div class="col"><div class="hint" style="font-weight:700;color:var(--txt);margin-bottom:4px">${LEAGUE_NAMES[l.tier]}</div>`;
-      l.table.slice(0,5).forEach(r=>{ inner+=`<div style="font-size:12px;padding:1px 0">${r.rank}. ${crestHTML(C(r.id))}${esc(C(r.id).cn)} <span class="hint">${r.pts}分</span></div>`; });
-      inner+="</div>";
-    });
-    inner+="</div>";
-    inner+=`<div class="hr"></div><div style="font-size:12px">🏆 ${CUP_NAME}冠军：<b>${h.cup!=null?esc(C(h.cup).cn):"—"}</b></div>`;
+    let inner=seasonSummaryHTML(h,false);
     if(h.topScorers&&h.topScorers.length)
       inner+=`<div class="hint" style="margin-top:6px">最佳射手：${h.topScorers.slice(0,3).map(x=>`${esc(x.n)}（${esc(x.c)}）${x.g}球`).join("　")}</div>`;
     c.appendChild(el("div","",inner));
@@ -3593,16 +4208,16 @@ function vCrests(v){
   b2.onclick=()=>{ if(confirm("确定清除所有自定义队徽？")){ CUSTOM_CRESTS={}; saveCustomCrests(); render(); toast("已恢复默认队徽"); } };
   const cnt=Object.keys(CUSTOM_CRESTS).length;
   tools.appendChild(b1); tools.appendChild(b2); tools.appendChild(multi);
-  tools.appendChild(el("div","hint",`<div style="margin-top:9px">当前已自定义 <b>${cnt}</b> / 60 支球队</div>`));
+  tools.appendChild(el("div","hint",`<div style="margin-top:9px">当前已自定义 <b>${cnt}</b> / ${WORLD.clubs.length} 支球队</div>`));
   v.appendChild(tools);
 
-  const bar=el("div"); bar.style.marginBottom="10px";
-  LEAGUE_SHORT.forEach((n,i)=>{ const b=el("button","sm"+(CRESTTIER===i?" on":""),n);
-    b.style.marginRight="6px"; b.onclick=()=>{CRESTTIER=i;render();}; bar.appendChild(b); });
+  const bar=el("div","segbar"); bar.style.cssText="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px";
+  [...NATIONS.map(n=>n.name),"欧洲其他"].forEach((n,i)=>{ const b=el("button","sm"+(CRESTTIER===i?" on":""),n);
+    b.onclick=()=>{CRESTTIER=i;render();}; bar.appendChild(b); });
   v.appendChild(bar);
 
   const grid=el("div","grid4");
-  WORLD.clubs.filter(c=>c.tier===CRESTTIER || (WORLD.clubs.filter(x=>x.tier===CRESTTIER).length===0))
+  WORLD.clubs.filter(c=>c.nation===CRESTTIER).sort((a,b)=>a.tier-b.tier||b.rep-a.rep)
     .forEach(c=>{
     const card=el("div","card"); card.style.textAlign="center";
     card.innerHTML=`<img class="crest" src="${crestURI(c)}" width="62" height="62" style="margin:0 auto 6px;display:block">
@@ -3612,9 +4227,9 @@ function vCrests(v){
     inp.onchange=e=>{ const f=e.target.files[0]; if(f) importCrest(c.id,f); };
     const bu=el("button","sm","更换"); bu.onclick=()=>inp.click();
     card.appendChild(bu); card.appendChild(inp);
-    if(CUSTOM_CRESTS[c.id]){
+    if(CUSTOM_CRESTS[c.en]){
       const br=el("button","sm","还原"); br.style.marginLeft="5px";
-      br.onclick=()=>{ delete CUSTOM_CRESTS[c.id]; saveCustomCrests(); render(); };
+      br.onclick=()=>{ delete CUSTOM_CRESTS[c.en]; saveCustomCrests(); render(); };
       card.appendChild(br);
     }
     grid.appendChild(card);
@@ -3647,8 +4262,8 @@ function shrinkImage(file, size, cb){
 function importCrest(clubId, file){
   shrinkImage(file,128,url=>{
     if(!url){ toast("图片无法读取","bad"); return; }
-    CUSTOM_CRESTS[clubId]=url;
-    if(!saveCustomCrests()){ delete CUSTOM_CRESTS[clubId]; toast("浏览器存储空间不足，无法保存队徽","bad"); return; }
+    CUSTOM_CRESTS[C(clubId).en]=url;
+    if(!saveCustomCrests()){ delete CUSTOM_CRESTS[C(clubId).en]; toast("浏览器存储空间不足，无法保存队徽","bad"); return; }
     toast(`${C(clubId).cn} 队徽已更新`); render();
   });
 }
@@ -3669,7 +4284,7 @@ function batchImport(files){
     const c=matchClubByFilename(f.name);
     if(!c){ miss.push(f.name); done++; if(done===files.length) finish(); return; }
     shrinkImage(f,128,url=>{
-      if(url){ CUSTOM_CRESTS[c.id]=url; ok++; }
+      if(url){ CUSTOM_CRESTS[c.en]=url; ok++; }
       done++; if(done===files.length) finish();
     });
   });
@@ -3690,8 +4305,7 @@ function startUserMatch(fx){
   // 防御：同一场比赛已有未结算的实例，不重开（重开会重掷随机结果）
   if(CURMATCH && CURMATCH.h===fx.home && CURMATCH.a===fx.away){ VIEW="match"; render(); return; }
   const side = fx.home===WORLD.userClub?0:1;
-  CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round,
-     knockout:fx.comp==="C", record:true, userSide:side});
+  CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round, record:true, userSide:side, ...knockoutOpts(fx)});
   ANIM={raf:0,playing:false,speed:2,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false};
   VIEW="match"; render();
   setTimeout(()=>toggleplay(true),350);
@@ -3710,6 +4324,7 @@ function vMatch(v){
        ${crestHTML(A,30)}<div class="tn">${esc(A.cn)}</div>
      </div>
      <div id="mclock" style="padding:4px">0'</div>
+     <div class="hint" style="text-align:center;font-size:11px;padding:0 8px 6px">${(()=>{const f=WORLD.fixtures.find(f=>f.day===WORLD.day&&f.home===M.h&&f.away===M.a); return f? esc(compLabel(f))+" · " : "";})()}${esc(M.neutral?"中立场地":H.stadium)}</div>
    </div>
    <div class="row">
      <div class="mcol-main">
@@ -3981,22 +4596,63 @@ function tacDialog(){
 /* =========================================================
    新游戏 / 存档 / 主循环入口
    ========================================================= */
-const SAVEKEY="fmweb_save_v1";
+const SAVEKEY="fmweb_save_v2";
+const OLD_SAVEKEY="fmweb_save_v1";
+/* ---------- IndexedDB 存档层（存档可达数 MB，localStorage 装不下）---------- */
+const DB_NAME="fmweb_db", DB_STORE="saves";
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    if(!window.indexedDB) return rej(new Error("no-idb"));
+    const r=indexedDB.open(DB_NAME,1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(DB_STORE)) r.result.createObjectStore(DB_STORE); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); r.onblocked=()=>rej(new Error("blocked"));
+  });
+}
+function idbSet(k,v){ return idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).put(v,k);
+  tx.oncomplete=()=>{db.close();res(true);}; tx.onerror=()=>{db.close();rej(tx.error);}; tx.onabort=()=>{db.close();rej(tx.error||new Error("abort"));}; })); }
+function idbGet(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(DB_STORE,"readonly"); const q=tx.objectStore(DB_STORE).get(k);
+  q.onsuccess=()=>{db.close();res(q.result);}; q.onerror=()=>{db.close();rej(q.error);}; })); }
+function idbDel(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
+  const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).delete(k);
+  tx.oncomplete=()=>{db.close();res(true);}; tx.onerror=()=>{db.close();rej(tx.error);}; })); }
+// 统一读写：优先 IndexedDB，失败时退回 localStorage
+async function storeSave(str, meta){
+  try{ await idbSet(SAVEKEY,str); try{ localStorage.removeItem(SAVEKEY); }catch(e){} }
+  catch(e){ localStorage.setItem(SAVEKEY,str); }   // 抛错交给调用方
+  localStorage.setItem(SAVEKEY+"_meta",JSON.stringify({...meta, mb:(str.length/1048576).toFixed(2)}));
+}
+async function readSave(){
+  let s=null;
+  try{ s=await idbGet(SAVEKEY); }catch(e){}
+  if(!s){ try{ s=localStorage.getItem(SAVEKEY); }catch(e){} }
+  return s||null;
+}
+async function deleteSave(){
+  try{ await idbDel(SAVEKEY); }catch(e){}
+  try{ localStorage.removeItem(SAVEKEY); localStorage.removeItem(SAVEKEY+"_meta"); }catch(e){}
+}
+// 载入存档对象并校验版本
+function adoptWorld(obj){
+  if(!obj || !obj.clubs || !obj.leagues) throw new Error("bad");
+  if(obj.ver!==2 || !obj.cups) throw new Error("oldver");
+  WORLD=obj; CURMATCH=null; VIEW="home"; LGNATION=null; AUTOSAVE_DAY=WORLD.day;
+}
+function loadErrMsg(e){ return (e&&e.message==="oldver")? "这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏" : "存档无法读取"; }
 
 function vSave(v){
   v.appendChild(el("div","",`<h1>存档</h1><div class="sub">存档保存在本浏览器中；也可以导出为文件长期保留</div>`));
   const g=el("div","grid2");
   const a=el("div","card"); a.innerHTML="<h3>浏览器存档</h3>";
   let info='<div class="hint">暂无存档</div>';
-  try{ const raw=localStorage.getItem(SAVEKEY);
-    if(raw){ const m=JSON.parse(localStorage.getItem(SAVEKEY+"_meta")||"{}");
-      info=`<div class="hint">${esc(m.club||"?")} · ${m.season||"?"} 赛季 · 第 ${m.day||0} 天<br>存档大小 ${(raw.length/1048576).toFixed(2)} MB</div>`; }
-  }catch(e){}
+  { const m=saveMeta();
+    if(m) info=`<div class="hint">${esc(m.club)} · ${m.season||"?"} 赛季 · 第 ${m.day} 天<br>存档大小 ${m.mb} MB${m.auto?" · 自动保存":""}</div>`; }
   a.appendChild(el("div","",info));
   const b1=el("button","pri","保存进度"); b1.onclick=()=>saveGame();
   const b2=el("button","","读取存档"); b2.style.marginLeft="8px"; b2.onclick=()=>loadGame();
   const b3=el("button","danger","删除存档"); b3.style.marginLeft="8px";
-  b3.onclick=()=>{ if(confirm("确定删除浏览器存档？")){ localStorage.removeItem(SAVEKEY); localStorage.removeItem(SAVEKEY+"_meta"); render(); } };
+  b3.onclick=()=>{ if(confirm("确定删除浏览器存档？")){ deleteSave().then(()=>render()); } };
   a.appendChild(el("div","hr")); a.appendChild(b1); a.appendChild(b2); a.appendChild(b3);
   g.appendChild(a);
 
@@ -4004,8 +4660,8 @@ function vSave(v){
   const e1=el("button","","导出存档文件"); e1.onclick=()=>exportSave();
   const inp=el("input"); inp.type="file"; inp.accept=".json"; inp.style.display="none";
   inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return;
-    const r=new FileReader(); r.onload=()=>{ try{ WORLD=JSON.parse(r.result); VIEW="home"; render(); toast("存档已导入"); }
-      catch(err){ toast("文件无法解析","bad"); } }; r.readAsText(f); };
+    const r=new FileReader(); r.onload=()=>{ try{ adoptWorld(JSON.parse(r.result)); render(); toast("存档已导入"); }
+      catch(err){ toast(loadErrMsg(err),"bad"); } }; r.readAsText(f); };
   const e2=el("button","","导入存档文件"); e2.style.marginLeft="8px"; e2.onclick=()=>inp.click();
   c2.appendChild(e1); c2.appendChild(e2); c2.appendChild(inp);
   g.appendChild(c2);
@@ -4028,19 +4684,17 @@ function vSave(v){
   nn.appendChild(nb); v.appendChild(nn);
 }
 function saveGame(){
-  try{
-    const s=JSON.stringify(WORLD);
-    localStorage.setItem(SAVEKEY,s);
-    localStorage.setItem(SAVEKEY+"_meta",JSON.stringify({club:UC().cn,season:WORLD.season,day:WORLD.day}));
-    toast(`已保存（${(s.length/1048576).toFixed(2)} MB）`);
-  }catch(e){ toast("保存失败：浏览器存储空间不足，请改用导出文件","bad"); }
+  const s=JSON.stringify(WORLD);
+  storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day})
+    .then(()=>{ AUTOSAVE_DAY=WORLD.day; toast(`已保存（${(s.length/1048576).toFixed(2)} MB）`); if(VIEW==="save") render(); })
+    .catch(()=>toast("保存失败：浏览器存储空间不足，请改用导出文件","bad"));
 }
 function loadGame(){
-  try{
-    const s=localStorage.getItem(SAVEKEY);
+  readSave().then(s=>{
     if(!s){ toast("没有找到存档","bad"); return; }
-    WORLD=JSON.parse(s); CURMATCH=null; VIEW="home"; render(); toast("存档已载入");
-  }catch(e){ toast("读取失败","bad"); }
+    try{ adoptWorld(JSON.parse(s)); render(); toast("存档已载入"); }
+    catch(e){ toast(loadErrMsg(e),"bad"); }
+  }).catch(()=>toast("读取失败","bad"));
 }
 function exportSave(){
   const blob=new Blob([JSON.stringify(WORLD)],{type:"application/json"});
@@ -4057,8 +4711,8 @@ function vHelp(v){
   <h1>玩法说明</h1><div class="sub">一份 5 分钟就能上手的指南</div>
   <div class="grid2">
     <div class="card"><h3>核心循环</h3>
-      <div style="line-height:1.85">点击右上角 <b class="pos">继续 ▶</b>（或按回车）推进时间。系统会自动模拟全世界 60 支球队的比赛、训练、转会与伤病；
-      轮到你的比赛时会自动进入比赛日界面。一个赛季从 8 月 1 日到次年 5 月，联赛 38 轮 + 足总杯 6 轮。</div></div>
+      <div style="line-height:1.85">点击右上角 <b class="pos">继续 ▶</b>（或按回车）推进时间。系统会自动模拟五大联赛 11 个级别、200 多支球队的比赛、训练、转会与伤病；
+      轮到你的比赛时会自动进入比赛日界面。一个赛季从 8 月 1 日到次年 5 月：周末踢联赛（20 队 38 轮 / 18 队 34 轮），周中踢国内杯赛与欧战。</div></div>
     <div class="card"><h3>比赛日</h3>
       <div style="line-height:1.85">2D 俯视球场实时演绎每一次传球、突破与射门。<br>
       • <b>空格</b>暂停 / 继续，可切换 0.5× ~ 8× 倍速<br>
@@ -4085,12 +4739,16 @@ function vHelp(v){
       <div style="line-height:1.85">收入来自门票、商业赞助与联赛分成；支出主要是周薪、转会费和建设投入。
       在<b>「建设」</b>页可以用现金升级教练团队 / 医疗中心 / 球探网络 / 青训学院，或扩建球场增加门票收入——工程有工期，赛季末董事会按余额核定转会预算，所以要在补强阵容和长期建设之间取舍。
       董事会每周根据你与期望排名的差距调整信心，赛季末若长期远低于期望会被解雇。
-      升级、夺冠会大幅提升信心，降级则相反。三级联赛之间每年 <b>3 升 3 降</b>（第 3–6 名打附加赛）。</div></div>
+      升级、夺冠会大幅提升信心，降级则相反。各国相邻级别之间每年 <b>3 升 3 降</b>（第 3–6 名打附加赛）。</div></div>
+    <div class="card"><h3>杯赛与欧战</h3>
+      <div style="line-height:1.85">每个国家都有一项全体球队参加的<b>国内杯赛</b>（足总杯 / 国王杯 / 意大利杯 / 德国杯 / 法国杯），单场淘汰，周中进行，决赛在中立场地。<br>
+      顶级联赛前 4 名（法甲前 3）获得下赛季<b>欧冠</b>资格，其后 3 名与杯赛冠军进入<b>欧联</b>；余下名额由葡、荷、苏、土等国的豪门填补。
+      欧战为 32 队小组赛（8 组 × 4，双循环）+ 主客场两回合淘汰赛，决赛单场定胜负。欧战奖金丰厚，是中小球队跨越阶层的捷径。</div></div>
   </div>
   <div class="card"><h3>快捷键</h3>
     <div class="hint">回车 = 继续　空格 = 比赛暂停/继续　Esc = 关闭弹窗　表头点击 = 排序　表格行点击 = 查看详情</div></div>
   <div class="card"><h3>存档</h3>
-    <div class="hint">进度不会自动保存。请在「存档」页手动保存到浏览器，或导出 .json 文件长期保留。</div></div>`;
+    <div class="hint">每隔几天会自动保存到本浏览器（IndexedDB），也可以在「存档」页手动保存或导出 .json 文件长期保留。</div></div>`;
 }
 
 /* ---------- 启动菜单 ---------- */
@@ -4099,19 +4757,21 @@ let AUTOSAVE_DAY=-99;
 
 function saveMeta(){
   try{
-    const raw=localStorage.getItem(SAVEKEY); if(!raw) return null;
-    const m=JSON.parse(localStorage.getItem(SAVEKEY+"_meta")||"{}");
-    return {club:m.club||"未知俱乐部", season:m.season, day:m.day||0, mb:(raw.length/1048576).toFixed(2)};
+    const raw=localStorage.getItem(SAVEKEY+"_meta"); if(!raw) return null;
+    const m=JSON.parse(raw);
+    return {club:m.club||"未知俱乐部", season:m.season, day:m.day||0, mb:m.mb||"?", auto:m.auto};
   }catch(e){ return null; }
 }
+function hasOldSave(){ try{ return !!localStorage.getItem(OLD_SAVEKEY); }catch(e){ return false; } }
+let AUTOSAVE_BUSY=false;
 function autoSave(){
   try{
     if(!WORLD||!WORLD.clubs) return;
-    if(WORLD.day-AUTOSAVE_DAY < 5) return;
-    AUTOSAVE_DAY=WORLD.day;
-    localStorage.setItem(SAVEKEY,JSON.stringify(WORLD));
-    localStorage.setItem(SAVEKEY+"_meta",JSON.stringify({club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1}));
-  }catch(e){}
+    if(WORLD.day-AUTOSAVE_DAY < 5 || AUTOSAVE_BUSY) return;
+    AUTOSAVE_DAY=WORLD.day; AUTOSAVE_BUSY=true;
+    const s=JSON.stringify(WORLD);
+    storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1}).catch(()=>{}).then(()=>{ AUTOSAVE_BUSY=false; });
+  }catch(e){ AUTOSAVE_BUSY=false; }
 }
 function enterGame(){
   document.getElementById("loadscr").style.display="none";
@@ -4119,13 +4779,12 @@ function enterGame(){
   render();
 }
 function continueGame(){
-  try{
-    const s=localStorage.getItem(SAVEKEY);
+  toast("正在读取存档…");
+  readSave().then(s=>{
     if(!s){ toast("没有找到存档","bad"); newGameScreen(); return; }
-    WORLD=JSON.parse(s); CURMATCH=null; VIEW="home";
-    AUTOSAVE_DAY=WORLD.day;
-    enterGame(); toast("已载入存档");
-  }catch(e){ toast("存档已损坏，无法读取","bad"); }
+    try{ adoptWorld(JSON.parse(s)); enterGame(); toast("已载入存档"); }
+    catch(e){ toast(loadErrMsg(e),"bad"); newGameScreen(); }
+  }).catch(()=>{ toast("存档无法读取","bad"); newGameScreen(); });
 }
 function startMenu(){
   const m=saveMeta();
@@ -4153,9 +4812,8 @@ function startMenu(){
   const inp=el("input"); inp.type="file"; inp.accept=".json"; inp.style.display="none";
   inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return;
     const r=new FileReader();
-    r.onload=()=>{ try{ WORLD=JSON.parse(r.result); CURMATCH=null; VIEW="home";
-        AUTOSAVE_DAY=WORLD.day; enterGame(); toast("存档已导入"); }
-      catch(err){ toast("文件无法解析","bad"); } };
+    r.onload=()=>{ try{ adoptWorld(JSON.parse(r.result)); enterGame(); toast("存档已导入"); }
+      catch(err){ toast(loadErrMsg(err),"bad"); } };
     r.readAsText(f); };
   box.appendChild(mk("","📂 导入存档文件", ()=>inp.click()));
   box.appendChild(inp);
@@ -4172,36 +4830,40 @@ function newGameScreen(){
     "padding:calc(20px + var(--sat)) calc(20px + var(--sar)) calc(20px + var(--sab)) calc(20px + var(--sal))";
   const box=el("div"); box.style.cssText="max-width:1080px;margin:0 auto";
   box.innerHTML=`<h1 style="font-size:32px;letter-spacing:5px;color:var(--acc);text-align:center;margin-bottom:4px">足球经理</h1>
-    <div class="sub" style="text-align:center">选择一家俱乐部，开始你的执教生涯 · ${LEAGUE_SHORT.join(" / ")} 共 60 队</div>`;
-  const tabs=el("div"); tabs.style.cssText="text-align:center;margin-bottom:14px";
-  let curTier=0;
+    <div class="sub" style="text-align:center">选择一家俱乐部，开始你的执教生涯 · 五大联赛 ${LEAGUE_DEFS.length} 个级别 共 ${LEAGUE_DEFS.reduce((s,l)=>s+l.n,0)} 队</div>`;
+  const tabsWrap=el("div"); tabsWrap.style.cssText="position:sticky;top:0;z-index:5;background:var(--bg);padding:8px 0 4px;margin-bottom:10px";
+  const tabs=el("div"); tabs.style.cssText="text-align:center;margin-bottom:8px";
+  const tabs2=el("div"); tabs2.style.cssText="text-align:center";
+  let curNation=0, curTier=0;
   const grid=el("div","grid4");
   function paint(){
-    tabs.innerHTML="";
-    LEAGUE_SHORT.forEach((n,i)=>{ const b=el("button","sm"+(curTier===i?" on":""),n);
-      b.style.margin="0 5px"; b.onclick=()=>{curTier=i;paint();}; tabs.appendChild(b); });
+    tabs.innerHTML=""; tabs2.innerHTML="";
+    NATIONS.forEach((n,i)=>{ const b=el("button","sm"+(curNation===i?" on":""),n.name);
+      b.style.margin="0 4px 6px"; b.onclick=()=>{curNation=i;curTier=0;paint();}; tabs.appendChild(b); });
+    NATIONS[curNation].tiers.forEach((t,i)=>{ const b=el("button","sm"+(curTier===i?" on":""),t.short);
+      b.style.margin="0 4px"; b.onclick=()=>{curTier=i;paint();}; tabs2.appendChild(b); });
     grid.innerHTML="";
-    CLUB_DATA[curTier].forEach((cd,idx)=>{
+    CLUB_DATA[curNation][curTier].forEach((cd,idx)=>{
       const [en,cn,sh,c1,c2,rep,cap,st]=cd;
       const d=el("div","card"); d.style.cssText+="cursor:pointer;transition:.15s";
       d.onmouseenter=()=>d.style.borderColor="var(--acc)";
       d.onmouseleave=()=>d.style.borderColor="var(--line)";
       const diff = rep>=80?["轻松","#00d47e"] : rep>=60?["普通","#7ed957"] : rep>=42?["有挑战","#ffd24a"] : rep>=30?["困难","#f0a020"] : ["地狱","#e5484d"];
       d.innerHTML=`<div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
-        <img class="crest" src="${crestURI(clubFromData(curTier,idx))}" width="38" height="38" alt="">
+        <img class="crest" src="${crestURI(clubFromData(curNation,curTier,idx))}" width="38" height="38" alt="">
         <div><b style="font-size:14px">${cn}</b><div class="hint" style="font-size:10px">${en}</div></div></div>
         <div class="hint">${st} · ${cap.toLocaleString()} 座</div>
         <div style="margin:6px 0"><div class="hint">俱乐部声望 ${rep}</div>
           <div class="bar"><i style="width:${rep}%;background:${diff[1]}"></i></div></div>
         <div class="hint">执教难度 <b style="color:${diff[1]}">${diff[0]}</b></div>`;
-      d.onclick=()=>startGame(curTier, idx);
+      d.onclick=()=>startGame(en);
       grid.appendChild(d);
     });
   }
   paint();
-  box.appendChild(tabs); box.appendChild(grid);
+  tabsWrap.appendChild(tabs); tabsWrap.appendChild(tabs2); box.appendChild(tabsWrap); box.appendChild(grid);
   const ft=el("div","hint"); ft.style.cssText="text-align:center;margin:22px 0 12px";
-  ft.textContent="提示：声望越低的球队资金与球员越差，挑战越大。";
+  ft.textContent="提示：声望越低的球队资金与球员越差，挑战越大。"+(hasOldSave()&&!saveMeta()?" 检测到旧版（仅英格兰）存档，它与五大联赛版不兼容，需要重新开始。":"");
   box.appendChild(ft);
   if(saveMeta()){                       // 有存档时留一个退路，别把人困在选队页
     const back=el("div"); back.style.cssText="text-align:center;margin-bottom:36px";
@@ -4210,10 +4872,9 @@ function newGameScreen(){
   }
   ls.appendChild(box);
 }
-function startGame(tier, idx){
-  const globalId = tier*20+idx;
-  newWorld(Date.now()%2147483647, globalId, tier);
-  WORLD.userClub=globalId;
+function startGame(en){
+  toast("正在生成五大联赛世界…");
+  newWorld(Date.now()%2147483647, en);
   const c=UC();
   autoPickLineup(c);
   news("欢迎上任",`欢迎来到 ${c.cn}！董事会对你本赛季的期望是「${c.board.expect}」。祝你好运，教练。`,"good");
@@ -4225,15 +4886,8 @@ function startGame(tier, idx){
 function showSeasonEnd(){
   const h=WORLD.history[WORLD.history.length-1];
   if(!h) return;
-  const c=UC();
-  let html=`<div class="hint" style="margin-bottom:10px">${h.season}/${String(h.season+1).slice(2)} 赛季全部结束</div><div class="row">`;
-  h.leagues.forEach(l=>{
-    html+=`<div class="col"><div style="font-weight:700;margin-bottom:4px">${LEAGUE_NAMES[l.tier]}</div>`;
-    l.table.slice(0,4).forEach(r=>html+=`<div style="font-size:12px">${r.rank}. ${crestHTML(C(r.id))}${esc(C(r.id).cn)} <span class="hint">${r.pts}分</span></div>`);
-    html+=`</div>`;
-  });
-  html+=`</div><div class="hr"></div>
-    <div>🏆 ${CUP_NAME}冠军：<b>${h.cup!=null?esc(C(h.cup).cn):"—"}</b></div>`;
+  let html=`<div class="hint" style="margin-bottom:10px">${h.season}/${String(h.season+1).slice(2)} 赛季全部结束</div>`;
+  html+=seasonSummaryHTML(h,true);
   if(h.topScorers&&h.topScorers.length){
     html+=`<div class="hr"></div><div style="font-weight:700;margin-bottom:4px">最佳射手</div>`;
     h.topScorers.slice(0,5).forEach(x=>html+=`<div style="font-size:12px">${esc(x.n)} <span class="hint">${esc(x.c)}</span> — <b>${x.g}</b> 球 / ${x.ap} 场</div>`);
