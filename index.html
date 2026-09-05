@@ -3121,6 +3121,7 @@ function renderTop(){
 }
 
 function render(){
+  markDirty();
   renderNav(); renderTop();
   const v=$("#view"); v.scrollTop=0;
   const fn={home:vHome,inbox:vInbox,squad:vSquad,tactics:vTactics,training:vTraining,youth:vYouth,
@@ -4642,9 +4643,9 @@ function adoptWorld(obj){
 function loadErrMsg(e){ return (e&&e.message==="oldver")? "这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏" : "存档无法读取"; }
 
 function vSave(v){
-  v.appendChild(el("div","",`<h1>存档</h1><div class="sub">存档保存在本浏览器中；也可以导出为文件长期保留</div>`));
+  v.appendChild(el("div","",`<h1>存档</h1><div class="sub">进度会在每次操作后自动保存到本浏览器；也可以导出为文件长期保留或换设备继续</div>`));
   const g=el("div","grid2");
-  const a=el("div","card"); a.innerHTML="<h3>浏览器存档</h3>";
+  const a=el("div","card"); a.innerHTML=`<h3>浏览器存档 <span class="tag t-ok">自动保存已开启</span></h3><div class="hint" id="save-status" style="margin-bottom:8px">${saveStatusText()}</div>`;
   let info='<div class="hint">暂无存档</div>';
   { const m=saveMeta();
     if(m) info=`<div class="hint">${esc(m.club)} · ${m.season||"?"} 赛季 · 第 ${m.day} 天<br>存档大小 ${m.mb} MB${m.auto?" · 自动保存":""}</div>`; }
@@ -4686,7 +4687,7 @@ function vSave(v){
 function saveGame(){
   const s=JSON.stringify(WORLD);
   storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day})
-    .then(()=>{ AUTOSAVE_DAY=WORLD.day; toast(`已保存（${(s.length/1048576).toFixed(2)} MB）`); if(VIEW==="save") render(); })
+    .then(()=>{ AUTOSAVE_DAY=WORLD.day; LAST_SAVE_AT=new Date(); SAVE_DIRTY=false; toast(`已保存（${(s.length/1048576).toFixed(2)} MB）`); if(VIEW==="save") render(); })
     .catch(()=>toast("保存失败：浏览器存储空间不足，请改用导出文件","bad"));
 }
 function loadGame(){
@@ -4748,12 +4749,41 @@ function vHelp(v){
   <div class="card"><h3>快捷键</h3>
     <div class="hint">回车 = 继续　空格 = 比赛暂停/继续　Esc = 关闭弹窗　表头点击 = 排序　表格行点击 = 查看详情</div></div>
   <div class="card"><h3>存档</h3>
-    <div class="hint">每隔几天会自动保存到本浏览器（IndexedDB），也可以在「存档」页手动保存或导出 .json 文件长期保留。</div></div>`;
+    <div class="hint">每次操作后都会自动保存到本浏览器（IndexedDB），关掉页面再打开点「继续游戏」即可接着玩。清理浏览器数据会连存档一起清掉，想长期保留或换设备，请在「存档」页导出 .json 文件。</div></div>`;
 }
 
 /* ---------- 启动菜单 ---------- */
 const SCR_PAD="padding:calc(20px + var(--sat)) calc(20px + var(--sar)) calc(20px + var(--sab)) calc(20px + var(--sal))";
 let AUTOSAVE_DAY=-99;
+/* ---------- 自动保存：任何操作后 1.5 秒内落盘 ----------
+   render() 会在每次界面状态变化后调用，在那里打脏标记；比赛动画播放中不落盘，
+   等结算后再存。切后台 / 关页面时如果还有未落盘的改动，立刻同步写一次。 */
+let SAVE_DIRTY=false, SAVE_TIMER=null, LAST_SAVE_AT=null, SAVE_INFLIGHT=false;
+function markDirty(){
+  if(!WORLD||!WORLD.clubs) return;
+  SAVE_DIRTY=true;
+  clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,1500);
+}
+function flushAutosave(force){
+  if(!SAVE_DIRTY||!WORLD||!WORLD.clubs) return;
+  if(CURMATCH && !CURMATCH.done && !force){ clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,3000); return; }
+  if(SAVE_INFLIGHT && !force){ clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,1000); return; }
+  SAVE_DIRTY=false; SAVE_INFLIGHT=true;
+  try{
+    const s=JSON.stringify(WORLD);
+    storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1})
+      .then(()=>{ LAST_SAVE_AT=new Date(); AUTOSAVE_DAY=WORLD.day; const el=document.getElementById("save-status"); if(el) el.textContent=saveStatusText(); })
+      .catch(()=>{ SAVE_DIRTY=true; })
+      .then(()=>{ SAVE_INFLIGHT=false; });
+  }catch(e){ SAVE_INFLIGHT=false; SAVE_DIRTY=true; }
+}
+function saveStatusText(){
+  if(!LAST_SAVE_AT) return SAVE_DIRTY? "有未保存的改动，稍后自动保存…" : "本局尚未自动保存";
+  const d=LAST_SAVE_AT;
+  return `上次自动保存 ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`+(SAVE_DIRTY?"（有新改动待保存）":"");
+}
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushAutosave(true); });
+window.addEventListener("pagehide",()=>flushAutosave(true));
 
 function saveMeta(){
   try{
@@ -4764,15 +4794,7 @@ function saveMeta(){
 }
 function hasOldSave(){ try{ return !!localStorage.getItem(OLD_SAVEKEY); }catch(e){ return false; } }
 let AUTOSAVE_BUSY=false;
-function autoSave(){
-  try{
-    if(!WORLD||!WORLD.clubs) return;
-    if(WORLD.day-AUTOSAVE_DAY < 5 || AUTOSAVE_BUSY) return;
-    AUTOSAVE_DAY=WORLD.day; AUTOSAVE_BUSY=true;
-    const s=JSON.stringify(WORLD);
-    storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1}).catch(()=>{}).then(()=>{ AUTOSAVE_BUSY=false; });
-  }catch(e){ AUTOSAVE_BUSY=false; }
-}
+function autoSave(){ markDirty(); }
 function enterGame(){
   document.getElementById("loadscr").style.display="none";
   document.getElementById("app").style.display="flex";
@@ -4880,6 +4902,7 @@ function startGame(en){
   news("欢迎上任",`欢迎来到 ${c.cn}！董事会对你本赛季的期望是「${c.board.expect}」。祝你好运，教练。`,"good");
   news("赛季前瞻",`${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季即将开始，你可以在「战术」中调整阵型，在「转会」中补强阵容。`,"info");
   VIEW="home"; AUTOSAVE_DAY=WORLD.day; enterGame();
+  SAVE_DIRTY=true; flushAutosave(true);          // 开局即落盘，退出后能直接「继续游戏」
 }
 
 /* ---------- 赛季结束 ---------- */
