@@ -1670,9 +1670,82 @@ function addMoney(club, amt, memo){
   if(club.finance.ledger.length>90) club.finance.ledger.length=90;
 }
 
+// ---------- 俱乐部建设 ----------
+const FACILITIES=[
+  {k:"coachRating",  n:"教练团队", ic:"🎓", desc:"球员训练成长更快，临场发挥更稳", mult:1.0},
+  {k:"physioRating", n:"医疗中心", ic:"🏥", desc:"体能恢复更快，训练与比赛受伤风险更低", mult:0.85},
+  {k:"scoutRating",  n:"球探网络", ic:"🔍", desc:"关注名单的情报积累更快，更早看清真实潜力", mult:0.7},
+  {k:"youthRating",  n:"青训学院", ic:"🌱", desc:"每年 3 月输送的青训球员起点与潜力更高", mult:1.1}
+];
+const STADIUM_OPTS=[2000,5000,10000];
+const STADIUM_MAX=90000;
+function projectsOf(c){ if(!c.projects) c.projects=[]; return c.projects; }
+function facilityCost(c,f){ const L=c[f.k]; return Math.round((Math.pow(L,2.5)*60000+250000)*f.mult*(0.5+c.rep/100)); }
+function facilityDays(c,f){ return 40+c[f.k]*6; }
+function stadiumCost(c,seats){ return Math.round(seats*4000*(0.7+c.rep/150)*(1+c.cap/120000)); }
+function stadiumDays(seats){ return 120+Math.round(seats/50); }
+function activeProject(c,type,key){ return projectsOf(c).find(p=>p.type===type && (key==null||p.k===key)); }
+function startFacility(c,f){
+  const say=m=>{ if(c.id===WORLD.userClub) toast(m,"bad"); };
+  if(c[f.k]>=20){ say("已达最高等级"); return false; }
+  if(activeProject(c,"fac",f.k)){ say("该设施正在升级中"); return false; }
+  const cost=facilityCost(c,f);
+  if(c.finance.balance<cost){ say("余额不足"); return false; }
+  const d=facilityDays(c,f);
+  addMoney(c,-cost,`${f.n}升级至 ${c[f.k]+1} 级`);
+  projectsOf(c).push({type:"fac",k:f.k,n:f.n,to:c[f.k]+1,left:d,total:d,cost});
+  return true;
+}
+function startStadium(c,seats){
+  const say=m=>{ if(c.id===WORLD.userClub) toast(m,"bad"); };
+  if(activeProject(c,"stad")){ say("球场扩建正在进行中"); return false; }
+  if(c.cap+seats>STADIUM_MAX){ say("超过球场容量上限 "+STADIUM_MAX.toLocaleString()); return false; }
+  const cost=stadiumCost(c,seats);
+  if(c.finance.balance<cost){ say("余额不足"); return false; }
+  const d=stadiumDays(seats);
+  addMoney(c,-cost,`球场扩建 +${seats.toLocaleString()} 座`);
+  projectsOf(c).push({type:"stad",seats,n:"球场扩建",left:d,total:d,cost});
+  return true;
+}
+function tickProjects(){
+  WORLD.clubs.forEach(c=>{
+    const ps=projectsOf(c); if(!ps.length) return;
+    ps.forEach(p=>p.left--);
+    ps.filter(p=>p.left<=0).forEach(p=>{
+      if(p.type==="fac"){
+        c[p.k]=clamp(c[p.k]+1,3,20);
+        if(c.id===WORLD.userClub) news(`${p.n}升级完成`,`${p.n}已升级至 ${c[p.k]} 级，新的设施即刻投入使用。`,"good");
+      } else {
+        c.cap+=p.seats; c.rep=clamp(c.rep+1,1,100);
+        if(c.id===WORLD.userClub) news("球场扩建竣工",`${c.stadium}的新看台正式落成，容量增至 ${c.cap.toLocaleString()} 座，俱乐部声望 +1。`,"good");
+      }
+    });
+    c.projects=ps.filter(p=>p.left>0);
+  });
+}
+// AI 俱乐部赛季末投资：余额充裕时升级最弱设施；常年满座则扩建
+function aiInvest(c){
+  const reserve=Math.pow(c.rep,3)*25;
+  let n=0;
+  const facs=FACILITIES.filter(f=>c[f.k]<20 && !activeProject(c,"fac",f.k)).sort((a,b)=>c[a.k]-c[b.k]);
+  for(const f of facs){ if(n>=2) break;
+    const cost=facilityCost(c,f);
+    if(c.finance.balance-cost>reserve && cost<c.finance.balance*0.3 && startFacility(c,f)) n++;
+  }
+  const occ=0.55+c.rep/220+(c.lastRank?(21-c.lastRank)/20*0.09:0.06);
+  if(occ>=0.96 && !activeProject(c,"stad")){
+    const seats=c.cap>=50000?10000:5000;
+    if(c.cap+seats<=STADIUM_MAX){
+      const cost=stadiumCost(c,seats);
+      if(c.finance.balance-cost>reserve && cost<c.finance.balance*0.35) startStadium(c,seats);
+    }
+  }
+}
+
 // ---------- 每日 ----------
 function dailyTick(){
   const d=WORLD.day;
+  tickProjects();
   Object.values(WORLD.players).forEach(p=>{
     if(p.injury>0){ p.injury--; if(p.injury===0){ p.condition=Math.min(p.condition,55); p.sharp=Math.max(20,p.sharp-25);
       if(p.clubId===WORLD.userClub) news(`${p.cn} 伤愈`,`${p.cn} 已恢复健康，可以重新参加训练。`,"good"); } }
@@ -2097,6 +2170,7 @@ function endSeason(){
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
   WORLD.day=0; WORLD.fired=false; WORLD.offers=[];
+  WORLD.clubs.forEach(c=>{ if(c.id!==WORLD.userClub) aiInvest(c); });
   WORLD.clubs.forEach(c=>{
     c.finance.income=0; c.finance.expense=0;
     c.finance.transferBudget=Math.round(Math.max(0,c.finance.balance)*0.42 + Math.pow(c.rep,3)*20);
@@ -2237,7 +2311,7 @@ function avgRating(p){ return p.apps? (p.ratingSum/p.apps).toFixed(2) : "-"; }
 const NAV=[
   ["组织",[["home","🏠","总览"],["inbox","✉","收件箱"],["schedule","📅","赛程"]]],
   ["球队",[["squad","👥","阵容"],["tactics","⚽","战术"],["training","🏃","训练"],["youth","🌱","青训"]]],
-  ["运营",[["transfer","💱","转会"],["scout","🔍","球探"],["finance","💷","财政"],["club","🏟","俱乐部"]]],
+  ["运营",[["transfer","💱","转会"],["scout","🔍","球探"],["finance","💷","财政"],["build","🏗","建设"],["club","🏟","俱乐部"]]],
   ["世界",[["league","🏆","联赛"],["stats","📊","数据"],["history","📜","历史"]]],
   ["系统",[["save","💾","存档"],["crests","🛡","队徽"],["help","❓","玩法说明"]]]
 ];
@@ -2274,7 +2348,7 @@ function render(){
   renderNav(); renderTop();
   const v=$("#view"); v.scrollTop=0;
   const fn={home:vHome,inbox:vInbox,squad:vSquad,tactics:vTactics,training:vTraining,youth:vYouth,
-    transfer:vTransfer,scout:vScout,finance:vFinance,club:vClub,league:vLeague,schedule:vSchedule,
+    transfer:vTransfer,scout:vScout,finance:vFinance,build:vBuild,club:vClub,league:vLeague,schedule:vSchedule,
     stats:vStats,history:vHistory,save:vSave,crests:vCrests,help:vHelp,match:vMatch}[VIEW]||vHome;
   v.innerHTML=""; fn(v);
 }
@@ -2934,6 +3008,90 @@ function vFinance(v){
   v.appendChild(w);
 }
 
+/* ================= 建设 ================= */
+function seasonOccupancy(c){
+  const home=WORLD.fixtures.filter(f=>f.played&&f.home===c.id&&f.attendance);
+  if(!home.length) return null;
+  const avg=home.reduce((s,f)=>s+f.attendance,0)/home.length;
+  return {avg:Math.round(avg), pct:avg/c.cap, n:home.length};
+}
+function confirmBuild(title, body, onOk){
+  openModal(title, body,
+    `<button onclick="closeModal()">再想想</button><button class="pri" id="bld-ok">确认投入</button>`);
+  $("#bld-ok").onclick=()=>{ closeModal(); onOk(); render(); };
+}
+function vBuild(v){
+  const c=UC(), ps=projectsOf(c);
+  v.appendChild(el("div","",`<h1>俱乐部建设</h1><div class="sub">可用现金 <b style="color:${c.finance.balance<0?'#e5484d':'var(--acc)'}">${money(c.finance.balance)}</b> · 进行中工程 ${ps.length} 项 · 工程款一次性从余额扣除</div>`));
+
+  // 进行中
+  const cur=el("div","card"); cur.innerHTML="<h3>进行中的工程</h3>";
+  if(!ps.length) cur.appendChild(el("div","empty","目前没有在建工程"));
+  ps.forEach(p=>{
+    const done=1-p.left/p.total;
+    const label=p.type==="fac"?`${p.n} → ${p.to} 级`:`${p.n} +${p.seats.toLocaleString()} 座`;
+    cur.appendChild(el("div","",`<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #1d242e;font-size:12px">
+      <span style="flex:0 0 150px">${esc(label)}</span>
+      <span style="flex:1">${barHTML(done,1,"#4a9eff")}</span>
+      <span class="hint mono" style="flex:0 0 90px;text-align:right">剩余 ${p.left} 天</span>
+      <span class="neg mono" style="flex:0 0 80px;text-align:right">${money(-p.cost)}</span></div>`));
+  });
+  v.appendChild(cur);
+
+  // 设施
+  const g=el("div","grid2");
+  FACILITIES.forEach(f=>{
+    const L=c[f.k], busy=activeProject(c,"fac",f.k), maxed=L>=20;
+    const cost=facilityCost(c,f), days=facilityDays(c,f), can=!busy&&!maxed&&c.finance.balance>=cost;
+    const card=el("div","card",`<h3>${f.ic} ${f.n}</h3>
+      <div class="attr"><span class="an">当前等级</span>${barHTML(L,20,attrColor(L))}<span class="av">${L}</span></div>
+      <div class="hint" style="margin:6px 0 10px">${f.desc}</div>
+      ${maxed?'<div class="hint">已达最高等级 20</div>':
+        `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div><div class="hint">升级至 ${L+1} 级</div><div class="big" style="color:${c.finance.balance>=cost?'':'#e5484d'}">${money(cost)}</div></div>
+          <div><div class="hint">工期</div><div class="big">${days} 天</div></div>
+          <div style="margin-left:auto"><button class="sm" ${can?"":"disabled"} data-fac="${f.k}">${busy?"升级中":"开始升级"}</button></div>
+        </div>`}`);
+    const b=card.querySelector("button[data-fac]");
+    if(b) b.onclick=()=>confirmBuild(`${f.n}升级`,
+      `<div style="line-height:1.9">将 <b>${f.n}</b> 从 ${L} 级升至 <b>${L+1} 级</b>。<br>
+       费用 <b class="neg">${money(cost)}</b>，工期 <b>${days} 天</b>，完工后立即生效。<br>
+       <span class="hint">${f.desc}。赛季末董事会按余额核定下季转会预算，建设投入会相应减少转会预算。</span></div>`,
+      ()=>{ if(startFacility(c,f)) toast(`${f.n}开始升级`,"good"); });
+    g.appendChild(card);
+  });
+  v.appendChild(g);
+
+  // 球场
+  const occ=seasonOccupancy(c), busyS=activeProject(c,"stad");
+  const st=el("div","card"); st.innerHTML=`<h3>🏟 球场扩建 · ${esc(c.stadium)}</h3>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px">
+      <div><div class="hint">当前容量</div><div class="big">${c.cap.toLocaleString()}</div></div>
+      <div><div class="hint">本季主场平均上座</div><div class="big">${occ?occ.avg.toLocaleString():"-"}</div></div>
+      <div><div class="hint">上座率</div><div class="big" style="color:${occ&&occ.pct>=0.97?'#00d47e':occ&&occ.pct<0.85?'#f0a020':''}">${occ?(occ.pct*100).toFixed(0)+"%":"-"}</div></div>
+      <div><div class="hint">票价</div><div class="big">£${c.tier===0?42:c.tier===1?27:19}</div></div>
+    </div>
+    <div class="hint" style="margin-bottom:10px">${!occ?"本赛季还没有主场比赛数据，可参考上季表现决定是否扩建。":occ.pct>=0.97?"几乎场场满座，扩建能直接转化为门票收入。":occ.pct<0.85?"上座率偏低，扩建的回报有限——先把成绩和声望做上去。":"上座率尚可，扩建后需要靓丽战绩来填满新看台。"}
+    容量上限 ${STADIUM_MAX.toLocaleString()} 座；竣工后声望 +1。</div>`;
+  const row=el("div"); row.style.cssText="display:flex;gap:10px;flex-wrap:wrap";
+  STADIUM_OPTS.forEach(seats=>{
+    const cost=stadiumCost(c,seats), days=stadiumDays(seats), over=c.cap+seats>STADIUM_MAX;
+    const can=!busyS&&!over&&c.finance.balance>=cost;
+    const o=el("div","card",`<div class="hint">新增座位</div><div class="big">+${seats.toLocaleString()}</div>
+      <div style="margin:6px 0 2px;color:${c.finance.balance>=cost?'':'#e5484d'}">${money(cost)}</div>
+      <div class="hint" style="margin-bottom:8px">工期 ${days} 天 · 每年多收约 ${money(seats*(c.tier===0?42:c.tier===1?27:19)*19)}</div>
+      <button class="sm" ${can?"":"disabled"}>${busyS?"扩建中":over?"超出上限":"开始扩建"}</button>`);
+    o.style.cssText="flex:1 1 160px;margin:0";
+    o.querySelector("button").onclick=()=>confirmBuild("球场扩建",
+      `<div style="line-height:1.9">为 <b>${esc(c.stadium)}</b> 新增 <b>${seats.toLocaleString()}</b> 个座位（${c.cap.toLocaleString()} → ${(c.cap+seats).toLocaleString()}）。<br>
+       费用 <b class="neg">${money(cost)}</b>，工期 <b>${days} 天</b>。<br>
+       <span class="hint">竣工后主场容量立即提升，俱乐部声望 +1。赛季末董事会按余额核定下季转会预算，建设投入会相应减少转会预算。</span></div>`,
+      ()=>{ if(startStadium(c,seats)) toast("球场扩建动工","good"); });
+    row.appendChild(o);
+  });
+  st.appendChild(row); v.appendChild(st);
+}
+
 /* ================= 俱乐部 ================= */
 function vClub(v){
   const c=UC();
@@ -2952,7 +3110,8 @@ function vClub(v){
     <div class="attr"><span class="an">队医水平</span>${barHTML(c.physioRating,20,attrColor(c.physioRating))}<span class="av">${c.physioRating}</span></div>
     <div class="attr"><span class="an">球探网络</span>${barHTML(c.scoutRating,20,attrColor(c.scoutRating))}<span class="av">${c.scoutRating}</span></div>
     <div class="attr"><span class="an">青训质量</span>${barHTML(c.youthRating,20,attrColor(c.youthRating))}<span class="av">${c.youthRating}</span></div>
-    <div class="hint" style="margin-top:8px">教练水平影响球员成长速度，队医影响伤病恢复，球探影响情报速度。</div>`));
+    <div class="hint" style="margin-top:8px">教练水平影响球员成长速度，队医影响伤病恢复，球探影响情报速度。
+    可在<a href="javascript:go('build')" style="color:var(--acc)">「建设」</a>页投入资金升级设施与扩建球场。</div>`));
   v.appendChild(g);
   const t=el("div","card"); t.innerHTML="<h3>荣誉室</h3>";
   if(!c.trophies.length) t.appendChild(el("div","empty","尚无荣誉，创造历史吧"));
@@ -3631,7 +3790,8 @@ function vHelp(v){
       • 其他球队也会向你报价，14 天内有效、可同时收多份，在转会页面处理；把球员<b>挂牌</b>可以吸引更多报价<br>
       • 市场上不时会出现潜力逆天的<b>超级妖人</b>——留意新闻里的天才少年传闻，抢先下手</div></div>
     <div class="card"><h3>经营与董事会</h3>
-      <div style="line-height:1.85">收入来自门票、商业赞助与联赛分成；支出主要是周薪和转会费。
+      <div style="line-height:1.85">收入来自门票、商业赞助与联赛分成；支出主要是周薪、转会费和建设投入。
+      在<b>「建设」</b>页可以用现金升级教练团队 / 医疗中心 / 球探网络 / 青训学院，或扩建球场增加门票收入——工程有工期，赛季末董事会按余额核定转会预算，所以要在补强阵容和长期建设之间取舍。
       董事会每周根据你与期望排名的差距调整信心，赛季末若长期远低于期望会被解雇。
       升级、夺冠会大幅提升信心，降级则相反。三级联赛之间每年 <b>3 升 3 降</b>（第 3–6 名打附加赛）。</div></div>
   </div>
