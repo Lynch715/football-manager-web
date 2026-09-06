@@ -2507,6 +2507,8 @@ function fin(c){
   return f;
 }
 function resetBudgetShift(c){ const f=c.finance; f.wageBase=f.wageBudget; f.trBase=f.transferBudget; f.shift=0; }
+// 董事会追加工资预算（青训入队等非主动签约造成的超支），不占用调配额度
+function grantWageBudget(c, amount){ const f=fin(c); amount=Math.round(amount); f.wageBudget+=amount; f.wageBase+=amount; }
 function shiftCost(x){ return x>=0? x : x*WAGE_SHIFT_BACK; }   // 达到该调配额累计付出的转会预算
 function shiftCapUp(c){   const f=fin(c); return Math.max(0, Math.round(Math.min(f.trBase*0.50, f.wageBase*0.25))); }
 function shiftCapDown(c){ const f=fin(c); return Math.max(0, Math.round(f.wageBase*0.25)); }
@@ -2955,6 +2957,11 @@ function youthIntake(){
     }
   });
   spawnWonderkids(ri(2,4));
+  // 青训与妖人是被动入队，不该把俱乐部顶破工资预算——差额由董事会追加
+  WORLD.clubs.forEach(c=>{
+    const over=wageBill(c)-c.finance.wageBudget;
+    if(over>0) grantWageBudget(c, over+wageBill(c)*0.01);
+  });
 }
 
 // ---------- 赛季结算 ----------
@@ -3959,11 +3966,13 @@ function budgetShiftCard(c){
   const [dn,up]=shiftRange(c);
   const prev=el("div"); prev.style.cssText="display:flex;gap:24px;flex-wrap:wrap;margin:12px 0 6px";
   const row=el("div"); row.style.cssText="display:flex;align-items:center;gap:12px;flex-wrap:wrap";
-  const rng=el("input"); rng.type="range"; rng.min=dn; rng.max=up; rng.step=Math.max(10000,Math.round((up-dn)/400/10000)*10000)||10000;
+  // step 必须让「0」落在刻度上，否则滑块回不到不调配的状态
+  const rng=el("input"); rng.type="range"; rng.min=dn; rng.max=up; rng.step=1;
   rng.value=clamp(f.shift,dn,up); rng.style.cssText="flex:1;min-width:220px";
   const btn=el("button","pri","申请调整");
   const rst=el("button","","归零");
-  const draw=v=>{
+  const draw=v0=>{
+    const v=clamp(Math.round(v0/1000)*1000, dn, up);
     const dTr=shiftCost(v)-shiftCost(f.shift), dWg=v-f.shift;
     const nTr=f.transferBudget-dTr, nWg=f.wageBudget+dWg, nRoom=Math.max(0,nWg-wageBill(c));
     prev.innerHTML=
@@ -3979,7 +3988,7 @@ function budgetShiftCard(c){
   rng.oninput=()=>draw(+rng.value);
   rst.onclick=()=>{ rng.value=clamp(0,dn,up); draw(+rng.value); };
   btn.onclick=()=>{
-    const before=f.shift, after=setBudgetShift(c,+rng.value);
+    const before=f.shift, after=setBudgetShift(c, clamp(Math.round(+rng.value/1000)*1000, dn, up));
     if(after===before){ toast("预算没有变化"); return; }
     toast(after>before? `已把 ${money(after-before)} 转会预算换成年薪空间` : `已把 ${money(before-after)} 年薪空间变现`);
     render();
@@ -4001,7 +4010,9 @@ function vFinance(v){
   [["银行余额",money(f.balance),f.balance<0?"警告：透支":"可用现金"],
    ["转会预算",money(f.transferBudget),"董事会核定"],
    ["周薪支出",money(wk),"年化 "+money(wk*52)],
-   ["工资预算",money(f.wageBudget),(f.wageBudget-wk*52>=0?"剩余 ":"超支 ")+money(Math.abs(f.wageBudget-wk*52))+"/年"
+   [(f.wageBudget-wk*52>=0?"剩余薪资空间":"薪资超支"),
+    money(Math.abs(f.wageBudget-wk*52)),
+    `已用 ${money(wk*52)} / 上限 ${money(f.wageBudget)}（${(wk*52/Math.max(1,f.wageBudget)*100).toFixed(0)}%）`
      +(fin(c).shift?`　<span class="tag ${f.shift>0?"t-ok":"t-w"}">${f.shift>0?"已调入":"已调出"} ${money(Math.abs(f.shift))}</span>`:"")]
   ].forEach(([t,b,s])=>g.appendChild(el("div","card",
     `<div class="hint">${t}</div><div class="big" style="margin:4px 0;color:${b.startsWith("-")?"#e5484d":""}">${b}</div><div class="hint">${s}</div>`)));
