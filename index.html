@@ -1259,19 +1259,20 @@ function newWorld(seed, userClubEn){
         youthRating: clamp(Math.round(gauss(rep/7.2,2.2)),3,20),
         trophies:[]
       };
-      club.finance.wageBudget = Math.round(Math.pow(rep,3)*245 + 1800000);   // 年度工资预算
+      club.finance.wageBudget = Math.round((Math.pow(rep,2.48)*2350 + 1200000)/1000)*1000;   // 年度工资预算（阵容生成后再校准）
       club.finance.transferBudget = Math.round(Math.pow(rep,3)*150 + 400000);
       WORLD.clubs.push(club);
     }
   });
   WORLD.clubs.forEach(c=>genSquad(c));
+  WORLD.clubs.forEach(c=>{ c.finance.wageBudget=calcWageBudget(c); });
   WORLD.clubs.forEach(c=>{ autoPickLineup(c); });
   // 自由球员
   for(let i=0;i<40;i++){
     const lvl=clamp(gauss(34,14),8,72);
     const pos=pick(POSITIONS);
     const p=makePlayer(lvl,pos,ri(19,35),-1);
-    p.wage=calcWage(p,30); p.value=Math.round(calcValue(p)*0.4); p.contract=WORLD.season;
+    p.wage=marketWage(p); p.value=Math.round(calcValue(p)*0.4); p.contract=WORLD.season;
     WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
   }
   // 初代超级妖人
@@ -2484,6 +2485,15 @@ function inTransferWindow(){
 function windowName(){ const m=dateOf(WORLD.day).getMonth()+1; return m===8?"夏窗":m===1?"冬窗":null; }
 
 function wageBill(c){ return c.squad.reduce((s,i)=>s+P(i).wage,0)*52; }
+// 年度工资预算：随声望浮动，并保证不低于现有薪资总额的 1.12 倍（小球会也要有签人空间）
+function calcWageBudget(c){
+  const base = Math.pow(c.rep,2.48)*2350 + 1200000;
+  return Math.round(Math.max(base, wageBill(c)*1.12)/1000)*1000;
+}
+// 剩余年薪空间（可用于新合同）
+function wageRoom(c){ return Math.max(0, c.finance.wageBudget - wageBill(c)); }
+// 自由球员的市场期望周薪：按当前能力重算，避免旧合同价格与实际要价脱节
+function marketWage(p){ return Math.max(300, Math.round(calcWage(p,30)*0.92/50)*50); }
 function askingPrice(p){
   const c=p.clubId>=0?C(p.clubId):null;
   let base=p.value;
@@ -2728,7 +2738,7 @@ function marketDaily(){
     const ps=c.squad.map(i=>P(i)).filter(p=>canSell(c,p));
     if(!ps.length) return;
     const worst=ps.sort((a,b)=>(a.ca+(a.pa-a.ca)*0.5)-(b.ca+(b.pa-b.ca)*0.5))[0];
-    c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; worst.listed=false; WORLD.freeAgents.push(worst.id);
+    c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; worst.listed=false; worst.wage=marketWage(worst); WORLD.freeAgents.push(worst.id);
   });
   aiTransferRound();
   aiOffersToUser();
@@ -2757,11 +2767,11 @@ function marketDaily(){
 function acceptOffer(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club), u=UC();
   if(!inTransferWindow()){ toast("转会窗已关闭","bad"); return; }
-  const fee=of.fee;
+  const fee=of.fee, freed=p.wage*52;
   transferPlayer(of.pid, of.club, fee, of.wage||wageDemand(p,b), ri(2,5));
   WORLD.offers=WORLD.offers.filter(o=>o.pid!==of.pid);
   WORLD.interest=interestList().filter(it=>it.pid!==of.pid);
-  news(`${p.cn} 转会 ${b.cn}`,`${u.cn} 接受了 ${b.cn} 的报价，${p.cn} 以 ${money(fee)} 转会离队。转会费的 70% 已计入转会预算。`,"good");
+  news(`${p.cn} 转会 ${b.cn}`,`${u.cn} 接受了 ${b.cn} 的报价，${p.cn} 以 ${money(fee)} 转会离队。转会费的 70% 已计入转会预算；同时释放年薪空间 ${money(freed)}，目前可用薪资空间 ${money(wageRoom(u))}/年。`,"good");
   toast(`${p.cn} 以 ${money(fee)} 转会至 ${b.cn}`); render();
 }
 function rejectOffer(i){
@@ -2817,19 +2827,19 @@ function releasePlayer(pid){
 function doRelease(pid){
   const p=P(pid), c=UC();
   if(p.clubId!==c.id) return;
-  const fee=releaseFee(p);
+  const fee=releaseFee(p), freedWage=p.wage*52;
   if(c.squad.length<=18){ toast("阵容不足 18 人，无法解约","bad"); return; }
   if(c.finance.balance<fee){ toast("资金不足，无法支付遣散费","bad"); return; }
   addMoney(c, -fee, `解约 ${p.cn}`);
   c.squad=c.squad.filter(i=>i!==pid);
   p.clubId=-1; p.listed=false; p.untouchable=false; p.unrest=0; p.morale=clamp(p.morale-10,5,100);
-  p.contract=WORLD.season; p.value=calcValue(p);
+  p.contract=WORLD.season; p.value=calcValue(p); p.wage=marketWage(p);
   WORLD.freeAgents.push(pid);
   WORLD.offers=(WORLD.offers||[]).filter(o=>o.pid!==pid);
   WORLD.interest=interestList().filter(it=>it.pid!==pid);
   WORLD.shortlist=(WORLD.shortlist||[]).filter(s=>s.id!==pid);
   autoPickLineup(c);
-  news(`${p.cn} 与俱乐部解约`,`${c.cn} 支付 ${money(fee)} 遣散费后与 ${p.cn} 提前解除合同，他现在是自由球员。`,"warn");
+  news(`${p.cn} 与俱乐部解约`,`${c.cn} 支付 ${money(fee)} 遣散费后与 ${p.cn} 提前解除合同，他现在是自由球员。释放年薪空间 ${money(freedWage)}，目前可用薪资空间 ${money(wageRoom(c))}/年。`,"warn");
   toast(`已与 ${p.cn} 解约，支付遣散费 ${money(fee)}`); closeModal(); render();
 }
 function toggleUntouchable(pid){
@@ -2850,7 +2860,7 @@ function makeWonderkid(clubId){
     p.contract=WORLD.season+ri(2,4);
     WORLD.players[p.id]=p; c.squad.push(p.id);
   }else{
-    p.wage=calcWage(p,30); p.contract=WORLD.season;
+    p.wage=marketWage(p); p.contract=WORLD.season;
     WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
   }
   p.value=calcValue(p);
@@ -2988,10 +2998,10 @@ function endSeason(){
       const c=C(p.clubId);
       if(c.id!==WORLD.userClub || rnd()<0.5){
         // AI 自动续约 / 放走
-        if(p.ca> c.rep*1.7 && rnd()<0.8){ p.contract=WORLD.season+1+ri(1,4); }
-        else { c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; WORLD.freeAgents.push(p.id); }
+        if(p.ca> c.rep*1.7 && rnd()<0.8){ p.contract=WORLD.season+1+ri(1,4); p.wage=Math.max(p.wage, calcWage(p,c.rep)); }
+        else { c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; p.wage=marketWage(p); WORLD.freeAgents.push(p.id); }
       } else {
-        c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; WORLD.freeAgents.push(p.id);
+        c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; p.wage=marketWage(p); WORLD.freeAgents.push(p.id);
         news(`${p.cn} 合同到期离队`,`${p.cn} 的合同已经到期并自由转会离开。`,"warn");
       }
     }
@@ -3024,7 +3034,7 @@ function endSeason(){
     const cap = c.id===WORLD.userClub? 30 : 26;   // AI 主动清理冗员，转会市场才有买家
     while(c.squad.length>cap){
       const worst=c.squad.map(i=>P(i)).sort((a,b)=>(a.ca+ (a.pa-a.ca)*0.6)-(b.ca+(b.pa-b.ca)*0.6))[0];
-      c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; WORLD.freeAgents.push(worst.id);
+      c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; worst.wage=marketWage(worst); WORLD.freeAgents.push(worst.id);
     }
   });
   // 自由球员市场容量上限，避免逐年膨胀（在各队清理冗员之后执行，只留最好的一批）
@@ -3039,6 +3049,7 @@ function endSeason(){
   WORLD.clubs.forEach(c=>{
     c.finance.income=0; c.finance.expense=0;
     c.finance.transferBudget=Math.round(Math.max(0,c.finance.balance)*0.42 + Math.pow(c.rep,3)*20);
+    c.finance.wageBudget=calcWageBudget(c);
     c.board.conf=clamp(c.board.conf*0.5+45,20,95);
     c.coachRating=clamp(c.coachRating+ri(-1,1),3,20);
     autoPickLineup(c);
@@ -3425,7 +3436,8 @@ function showPlayer(pid){
         <tr><td class="hint">当前能力</td><td><b style="color:${caColor(p.ca)}">${ovr(p)}</b></td></tr>
         <tr><td class="hint">潜力</td><td>${hidePA?`<span class="hint">${paRange(p,know)}</span>`:`<b style="color:${caColor(p.pa)}">${Math.round(p.pa/2)}</b>`}</td></tr>
         <tr><td class="hint">身价</td><td>${money(p.value)}</td></tr>
-        <tr><td class="hint">周薪</td><td>${money(p.wage)}</td></tr>
+        <tr><td class="hint">${own?"周薪":"现周薪"}</td><td>${money(p.wage)}</td></tr>
+        ${own?"":`<tr><td class="hint">要求周薪</td><td><b style="color:var(--acc)">${money(wageDemand(p,UC()))}</b></td></tr>`}
         <tr><td class="hint">合同至</td><td>${p.contract} 年${p.contract-WORLD.season<=1?' <span class="tag t-w">即将到期</span>':''}</td></tr>
         <tr><td class="hint">状态</td><td>${condTag(p)}</td></tr>
         <tr><td class="hint">士气</td><td>${moraleTxt(p.morale)}</td></tr>
@@ -3642,7 +3654,7 @@ function vTransfer(v){
   const c=UC();
   v.appendChild(el("div","",`<h1>转会市场</h1><div class="sub">
     转会预算 <b style="color:var(--acc)">${money(c.finance.transferBudget)}</b> ·
-    年薪空间 ${money(Math.max(0,c.finance.wageBudget-wageBill(c)))} ·
+    年薪空间 <b style="color:${wageRoom(c)>0?"var(--ok,#00d47e)":"var(--bad)"}">${money(wageRoom(c))}</b> ·
     ${inTransferWindow()?`<span class="tag t-ok">${windowName()}开启中 · 还剩 ${windowDaysLeft()} 天</span>${isDeadline()?' <span class="tag t-w">截止日临近</span>':''}`:`<span class="tag t-w">转会窗关闭</span> <span class="hint">下一窗口约 ${nextWindowIn()} 天后开启</span>`}</div>`));
 
   // 收到的报价
@@ -3725,7 +3737,9 @@ function vTransfer(v){
     {h:"能力",k:"ca",cls:"num",v:p=>p.ca,r:p=>`<b style="color:${caColor(p.ca)}">${ovr(p)}</b>`},
     {h:"进球",k:"g",cls:"num",v:p=>p.goals,r:p=>p.goals},
     {h:"评分",k:"rt",cls:"num",v:p=>p.apps?p.ratingSum/p.apps:0,r:p=>avgRating(p)},
-    {h:"周薪",k:"w",cls:"num",v:p=>p.wage,r:p=>money(p.wage)},
+    {h:"要求周薪",k:"w",cls:"num",v:p=>wageDemand(p,c),r:p=>{
+      const d=wageDemand(p,c), fit=wageBill(c)+d*52<=c.finance.wageBudget;
+      return `<span style="color:${fit?"":"var(--bad)"}" title="${fit?"薪资空间可承受":"超出工资预算"}">${money(d)}</span>`;}},
     {h:"要价",k:"ask",cls:"num",v:p=>askingPrice(p),r:p=>`<b>${money(askingPrice(p))}</b>`},
     {h:"",k:"z",nos:true,r:p=>(p.listed?'<span class="tag t-w">挂牌</span>':'')+perfTag(p)+(WORLD.shortlist.some(x=>x.id===p.id)?'<span class="tag t-i">关注中</span>':'')}
   ], pool, {onRow:p=>showPlayer(p.id)}));
@@ -3769,7 +3783,7 @@ function makeBid(pid){
      <div style="margin-top:12px"><label>转会费（£）</label><input id="bid-fee" type="number" value="${ask}" style="width:180px"></div>
      <div style="margin-top:8px"><label>周薪（£）</label><input id="bid-wage" type="number" value="${wg}" style="width:180px"></div>
      <div style="margin-top:8px"><label>合同年限</label><select id="bid-yr"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
-     <div class="hint" style="margin-top:12px">你的转会预算：${money(c.finance.transferBudget)}　薪资空间：${money(Math.max(0,c.finance.wageBudget-wageBill(c)))}/年</div>`,
+     <div class="hint" style="margin-top:12px">你的转会预算：${money(c.finance.transferBudget)}　薪资空间：${money(wageRoom(c))}/年（本合同将占用 ${money(wg*52)}/年）</div>`,
     `<button class="pri" onclick="submitBid(${pid})">提交报价</button><button onclick="closeModal()">取消</button>`);
 }
 function submitBid(pid){
@@ -3874,7 +3888,7 @@ function vFinance(v){
   [["银行余额",money(f.balance),f.balance<0?"警告：透支":"可用现金"],
    ["转会预算",money(f.transferBudget),"董事会核定"],
    ["周薪支出",money(wk),"年化 "+money(wk*52)],
-   ["工资预算",money(f.wageBudget),"剩余 "+money(f.wageBudget-wk*52)]
+   ["工资预算",money(f.wageBudget),(f.wageBudget-wk*52>=0?"剩余 ":"超支 ")+money(Math.abs(f.wageBudget-wk*52))+"/年"]
   ].forEach(([t,b,s])=>g.appendChild(el("div","card",
     `<div class="hint">${t}</div><div class="big" style="margin:4px 0;color:${b.startsWith("-")?"#e5484d":""}">${b}</div><div class="hint">${s}</div>`)));
   v.appendChild(g);
@@ -4725,6 +4739,14 @@ function adoptWorld(obj){
   if(!obj || !obj.clubs || !obj.leagues) throw new Error("bad");
   if(obj.ver!==2 || !obj.cups) throw new Error("oldver");
   WORLD=obj; CURMATCH=null; VIEW="home"; LGNATION=null; AUTOSAVE_DAY=WORLD.day;
+  migrateWorld();
+}
+// 旧存档迁移：重算工资预算（旧公式对小球会过紧），并把自由球员的旧合同周薪刷新为市场期望
+function migrateWorld(){
+  if(!WORLD || WORLD.wageFix2) return;
+  WORLD.clubs.forEach(c=>{ c.finance.wageBudget = calcWageBudget(c); });
+  (WORLD.freeAgents||[]).forEach(id=>{ const p=P(id); if(p) p.wage=marketWage(p); });
+  WORLD.wageFix2 = 1;
 }
 function loadErrMsg(e){ return (e&&e.message==="oldver")? "这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏" : "存档无法读取"; }
 
