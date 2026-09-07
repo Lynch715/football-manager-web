@@ -3504,7 +3504,10 @@ function openModal(title, html, footer){
   $("#modal-ft").innerHTML=footer||'<button onclick="closeModal()">关闭</button>';
   $("#modal").classList.add("on");
 }
-function closeModal(){ $("#modal").classList.remove("on"); }
+function closeModal(){ $("#modal").classList.remove("on");
+  // 换人面板若从右上角 × 关闭，也要恢复比赛
+  if(typeof SUBRESUME!=="undefined" && SUBRESUME && CURMATCH && VIEW==="match" && !CURMATCH.done){ SUBRESUME=false; SUBQ=[]; SUBOUT=null; toggleplay(true); }
+}
 
 function crestHTML(c,sz){
   const s=sz||18;
@@ -4860,7 +4863,7 @@ function vMatch(v){
            background:rgba(0,212,126,.22);font-size:52px;font-weight:900;letter-spacing:8px;color:#fff;text-shadow:0 3px 14px #000">GOAL!</div>
        </div>
        <div style="display:flex;gap:7px;margin-top:10px;flex-wrap:wrap;align-items:center">
-         <button class="pri" id="btn-play" style="min-width:88px">▶ 开始</button>
+         <button class="pri" id="btn-play" style="min-width:88px">${ANIM.playing?"⏸ 暂停":M.frames.length?"▶ 继续":"▶ 开始"}</button>
          ${SPEEDS.map((s,i)=>`<button class="sm spd ${ANIM.speed===s[1]?"on":""}" data-s="${s[1]}">${s[0]}</button>`).join("")}
          <button class="sm" id="btn-skip">⏭ 直接看结果</button>
          <button class="sm" id="btn-sub">🔁 换人 (${5-M.subsMade[M.userSide]})</button>
@@ -4897,11 +4900,13 @@ function toggleplay(force){
   const b=$("#btn-play"); if(!b) return;
   ANIM.playing = force!=null? force : !ANIM.playing;
   b.textContent=ANIM.playing?"⏸ 暂停":"▶ 继续";
+  cancelAnimationFrame(ANIM.raf);                       // 先取消旧循环，避免重复 rAF 叠加
   if(ANIM.playing){ ANIM.last=performance.now(); ANIM.raf=requestAnimationFrame(animLoop); }
-  else { cancelAnimationFrame(ANIM.raf); drawPitch(1); }
+  else drawPitch(1);
 }
 function animLoop(ts){
   const M=CURMATCH; if(!M||VIEW!=="match"){ ANIM.playing=false; return; }
+  if(!ANIM.playing) return;                             // 已暂停的残留回调直接退出
   const dt=Math.min(120, ts-ANIM.last); ANIM.last=ts;
   ANIM.acc += dt*ANIM.speed;
   let steps=0;
