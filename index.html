@@ -4902,7 +4902,7 @@ function toggleplay(force){
   b.textContent=ANIM.playing?"⏸ 暂停":"▶ 继续";
   cancelAnimationFrame(ANIM.raf);                       // 先取消旧循环，避免重复 rAF 叠加
   if(ANIM.playing){ ANIM.last=performance.now(); ANIM.raf=requestAnimationFrame(animLoop); }
-  else drawPitch(1);
+  else { drawPitch(1); refreshMatchUI(true); }
 }
 function animLoop(ts){
   const M=CURMATCH; if(!M||VIEW!=="match"){ ANIM.playing=false; return; }
@@ -4920,7 +4920,7 @@ function animLoop(ts){
     if(M.score[0]+M.score[1]>before){ const g=M.events.slice().reverse().find(e=>e.type==="goal"); flashGoal(g?g.text.replace(/^⚽ 进球！/,"").replace(/\s+\d+-\d+$/,""):""); }
   }
   if(M.done && !ANIM.ended){ ANIM.ended=true; ANIM.playing=false;
-    cancelAnimationFrame(ANIM.raf); onMatchEnd(); drawPitch(1); refreshMatchUI(); return; }
+    cancelAnimationFrame(ANIM.raf); onMatchEnd(); drawPitch(1); refreshMatchUI(true); return; }
   try{ drawPitch(clamp(ANIM.acc/PHASE_MS,0,1)); }catch(e){ if(!ANIM.drawErr){ ANIM.drawErr=1; console.error(e); toast("球场绘制出错："+e.message,"bad"); } }
   try{ refreshMatchUI(); }catch(e){ console.error(e); }
   if(ANIM.playing) ANIM.raf=requestAnimationFrame(animLoop);
@@ -4974,13 +4974,18 @@ function showPostMatch(M, seasonEnded){
 }
 
 // ---------- 刷新界面元素 ----------
-function refreshMatchUI(){
+function refreshMatchUI(force){
   const M=CURMATCH; if(!M) return;
-  const sc=$("#m-sc"); if(sc) sc.textContent=`${M.score[0]} : ${M.score[1]}`;
+  const setT=(el,t)=>{ if(el && el.textContent!==t) el.textContent=t; };
+  setT($("#m-sc"), `${M.score[0]} : ${M.score[1]}`);
   const ck=$("#mclock"); if(ck){
     const mm=Math.min(Math.floor(M.t), M.half===1?45+M.addedTime:90+M.addedTime);
-    ck.textContent = M.done? "全场结束" : (mm>=90? `90+${mm-90}'` : mm>=45&&M.half===1? `45+${mm-45}'` : mm+"'");
+    setT(ck, M.done? "全场结束" : (mm>=90? `90+${mm-90}'` : mm>=45&&M.half===1? `45+${mm-45}'` : mm+"'"));
   }
+  // 重的 DOM 更新（统计/事件流/球员条）限频：高速播放时每帧重写会把手机主线程占满，点击被吞
+  const now=performance.now();
+  if(!force && ANIM.playing && !M.done && now-(ANIM.uiT||0)<280) return;
+  ANIM.uiT=now;
   const st=$("#m-stats");
   if(st){
     const s=M.stats, tot=(a,b)=>a+b||1;
@@ -4993,11 +4998,12 @@ function refreshMatchUI(){
       return `<div style="margin-bottom:5px"><div style="display:flex;font-size:11px"><b style="width:40px">${a}</b>
       <span class="hint" style="flex:1;text-align:center">${n}</span><b style="width:40px;text-align:right">${b}</b></div>${bar}</div>`;
     };
-    st.innerHTML=line("控球率",s[0].poss||Math.round(M.possTicks[0]/(M.possTicks[0]+M.possTicks[1]||1)*100),
+    const sh=line("控球率",s[0].poss||Math.round(M.possTicks[0]/(M.possTicks[0]+M.possTicks[1]||1)*100),
                        s[1].poss||100-Math.round(M.possTicks[0]/(M.possTicks[0]+M.possTicks[1]||1)*100))
       +line("射门",s[0].shots,s[1].shots)+line("射正",s[0].sot,s[1].sot)
       +line("xG",s[0].xg.toFixed(2),s[1].xg.toFixed(2))
       +line("角球",s[0].corners,s[1].corners)+line("犯规",s[0].fouls,s[1].fouls);
+    if(st._h!==sh){ st._h=sh; st.innerHTML=sh; }
   }
   const fd=$("#mfeed");
   if(fd && ANIM.evShown<M.events.length){
@@ -5050,7 +5056,8 @@ function drawPitch(alpha){
   if(!M) return;
   const a = alpha==null?1:alpha;
   const now=performance.now();
-  const fs=clamp(W/(cv.clientWidth||W),1,2.2);           // 小屏上字幕按显示比例放大
+  if(!ANIM.cwT || performance.now()-ANIM.cwT>500){ ANIM.cw=cv.clientWidth||W; ANIM.cwT=performance.now(); }
+  const fs=clamp(W/(ANIM.cw||W),1,2.2);                   // 小屏上字幕按显示比例放大（clientWidth 限频读取，避免每帧强制布局）
   const ease=t=>t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;      // 球员位移缓动
   const A=ANIM.prev, B=ANIM.cur;
   const kind=(B&&B.k)||"";
@@ -5225,7 +5232,7 @@ function applySubs(){
 }
 function cancelSubDialog(){ closeSubDialog(); }
 function closeSubDialog(){
-  SUBQ=[]; SUBOUT=null; closeModal(); refreshMatchUI(); drawPitch(1);
+  SUBQ=[]; SUBOUT=null; closeModal(); refreshMatchUI(true); drawPitch(1);
   if(SUBRESUME && CURMATCH && !CURMATCH.done){ SUBRESUME=false; toggleplay(true); }
 }
 function tacDialog(){
