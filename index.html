@@ -878,8 +878,29 @@ const FORMATIONS = {
  "4-4-1-1":[["GK",6,50],["DR",22,84],["DC",18,62],["DC",18,38],["DL",22,16],
           ["MR",50,86],["MC",46,60],["MC",46,40],["ML",50,14],["AM",64,50],["ST",80,50]],
  "3-4-3":[["GK",6,50],["DC",18,70],["DC",16,50],["DC",18,30],
-          ["MR",48,88],["MC",44,62],["MC",44,38],["ML",48,12],["ML",74,82],["ST",80,50],["MR",74,18]]
+          ["MR",48,88],["MC",44,62],["MC",44,38],["ML",48,12],["ML",74,82],["ST",80,50],["MR",74,18]],
+ "4-3-1-2":[["GK",6,50],["DR",23,84],["DC",18,62],["DC",18,38],["DL",23,16],
+          ["DM",36,50],["MC",48,68],["MC",48,32],["AM",62,50],["ST",78,58],["ST",78,42]],
+ "4-3-2-1":[["GK",6,50],["DR",23,84],["DC",18,62],["DC",18,38],["DL",23,16],
+          ["MC",42,66],["DM",38,50],["MC",42,34],["AM",62,62],["AM",62,38],["ST",80,50]],
+ "4-2-2-2":[["GK",6,50],["DR",23,84],["DC",18,62],["DC",18,38],["DL",23,16],
+          ["DM",38,60],["DM",38,40],["AM",60,70],["AM",60,30],["ST",78,58],["ST",78,42]],
+ "4-5-1":[["GK",6,50],["DR",23,84],["DC",18,62],["DC",18,38],["DL",23,16],
+          ["MR",52,86],["MC",46,64],["DM",40,50],["MC",46,36],["ML",52,14],["ST",78,50]],
+ "4-2-4":[["GK",6,50],["DR",22,84],["DC",18,62],["DC",18,38],["DL",22,16],
+          ["DM",38,60],["DM",38,40],["ML",66,84],["ST",78,60],["ST",78,40],["MR",66,16]],
+ "3-4-1-2":[["GK",6,50],["DC",18,70],["DC",16,50],["DC",18,30],
+          ["MR",48,88],["MC",44,62],["MC",44,38],["ML",48,12],["AM",62,50],["ST",78,58],["ST",78,42]],
+ "3-4-2-1":[["GK",6,50],["DC",18,70],["DC",16,50],["DC",18,30],
+          ["MR",46,88],["MC",42,62],["MC",42,38],["ML",46,12],["AM",64,66],["AM",64,34],["ST",80,50]],
+ "5-4-1":[["GK",6,50],["DR",28,88],["DC",16,68],["DC",14,50],["DC",16,32],["DL",28,12],
+          ["MR",48,86],["MC",44,60],["MC",44,40],["ML",48,14],["ST",78,50]],
+ "5-2-3":[["GK",6,50],["DR",28,88],["DC",16,68],["DC",14,50],["DC",16,32],["DL",28,12],
+          ["MC",44,62],["MC",44,38],["ML",70,84],["ST",80,50],["MR",70,16]]
 };
+// AI 球队开局随机阵型（按常见程度加权）
+const AI_FORMS=["4-4-2","4-4-2","4-3-3","4-3-3","4-3-3","4-2-3-1","4-2-3-1","4-2-3-1","4-2-3-1","3-5-2","3-5-2","3-4-3",
+                "4-1-4-1","5-3-2","4-3-1-2","3-4-2-1","4-2-2-2","5-4-1","4-5-1","4-4-1-1","3-4-1-2"];
 
 const MENTALITY = ["死守","防守","平衡","进攻","强攻"];
 const TEMPO_N = ["缓慢","偏慢","正常","偏快","极快"];
@@ -1251,7 +1272,7 @@ function newWorld(seed, userClubEn){
     players:{}, clubs:[], leagues:[], cups:[], euro:null, euroQual:null,
     userClub:0, news:[], inbox:[], transferLog:[], history:[],
     freeAgents:[], scoutReports:[], shortlist:[],
-    settings:{speed:2, autoSub:true},
+    settings:{speed:1, autoSub:true},
     started:false
   };
   let cid=0;
@@ -1282,6 +1303,7 @@ function newWorld(seed, userClubEn){
   });
   WORLD.clubs.forEach(c=>genSquad(c));
   WORLD.clubs.forEach(c=>{ c.finance.wageBudget=calcWageBudget(c); resetBudgetShift(c); });
+  WORLD.clubs.forEach(c=>{ if(c.en!==userClubEn) c.tactic.formation=pick(AI_FORMS); c.tactic.fmtV2=1; });
   WORLD.clubs.forEach(c=>{ autoPickLineup(c); });
   // 自由球员
   for(let i=0;i<40;i++){
@@ -1293,6 +1315,7 @@ function newWorld(seed, userClubEn){
   }
   // 初代超级妖人
   spawnWonderkids(ri(3,5));
+  if(rnd()<0.6) spawnLegendFA(true);
   WORLD.userClub = Math.max(0, WORLD.clubs.findIndex(c=>c.en===userClubEn));
   buildSeason();
   setBoardExpectation();
@@ -1909,13 +1932,14 @@ function stepMatch(M){
         if(inBox && rnd()<0.030){ penalty(M,side,o); return finPhase(M,dt); }
         // 任意球
         if(ax>72 && dy<22 && rnd()<0.45){ freeKick(M,side,o); return finPhase(M,dt); }
-        M.ballOwner=o; return finPhase(M,dt);
+        M._k="foul"; M.ballOwner=o; return finPhase(M,dt);
       }
       D.tackleOk++; D.rating+=0.07; o.rating-=0.05;
-      turnover(M,D); return finPhase(M,dt);
+      M._k="tackle"; turnover(M,D); return finPhase(M,dt);
     } else { o.rating+=0.03; }
   }
 
+  M._k=act;
   switch(act){
     case "shoot": doShot(M,side,o,distGoal,dy,pr,false); break;
     case "cross": doCross(M,side,o); break;
@@ -1928,9 +1952,11 @@ function stepMatch(M){
 function finPhase(M,dt){
   updatePositions(M);
   if(M.record){
-    M.frames.push({t:M.t, b:{x:R1(M.ball.x),y:R1(M.ball.y)}, s:M.side,
-      p:M.teams.flatMap(T=>T.men.filter(m=>!m.off).map(m=>[Math.round(m.x*10)/10,Math.round(m.y*10)/10]))});
+    const list=M.teams.flatMap(T=>T.men.filter(m=>!m.off));
+    M.frames.push({t:M.t, b:{x:R1(M.ball.x),y:R1(M.ball.y)}, s:M.side, k:M._k||"", o:list.indexOf(M.ballOwner),
+      p:list.map(m=>[Math.round(m.x*10)/10,Math.round(m.y*10)/10])});
   }
+  M._k="";
   M.phase++;
   // 半场 / 结束
   if(M.half===1 && M.t>=45+M.addedTime){
@@ -2413,6 +2439,7 @@ function isMatchDayFor(cid,d){
 
 // ---------- 每周（周一） ----------
 function weeklyTick(){
+  if(rnd()<0.028) spawnLegendFA();
   // 工资
   WORLD.clubs.forEach(c=>{
     const wages=c.squad.reduce((s,id)=>s+P(id).wage,0);
@@ -2952,6 +2979,238 @@ function spawnWonderkids(n){
   return arr;
 }
 
+// ---------- 传奇球员（青年时代）----------
+// 行格式：[英文名, 中文名, 国籍, 位置, 巅峰总评, 出生年, 身高, 六维(非GK: 速度/射门/传球/盘带/防守/身体; GK: 扑救/手控/开球/反应/速度/站位)]
+const LEGENDS=[
+["Pelé","贝利","巴西","AM",98,1940,173,[95,96,93,96,60,76]],
+["Diego Maradona","马拉多纳","阿根廷","AM",97,1960,165,[92,93,92,97,40,76]],
+["Ronaldo","罗纳尔多","巴西","ST",96,1976,183,[97,95,81,95,45,76]],
+["Zinedine Zidane","齐达内","法国","AM",96,1972,185,[85,92,96,95,75,86]],
+["Garrincha","加林查","巴西","MR",94,1933,169,[90,87,94,96,41,68]],
+["Johan Cruyff","克鲁伊夫","荷兰","ST",94,1947,180,[91,92,91,94,42,73]],
+["Lev Yashin","雅辛","苏联","GK",94,1929,189,[95,89,75,96,65,95]],
+["Paolo Maldini","马尔蒂尼","意大利","DC",94,1968,186,[86,56,75,69,96,83]],
+["Ronaldinho","罗纳尔迪尼奥","巴西","ML",94,1980,180,[92,90,91,95,37,81]],
+["Carlos Alberto","卡洛斯·阿尔贝托","巴西","DR",93,1944,180,[90,66,81,86,90,87]],
+["Eusébio","尤西比奥","葡萄牙","ST",93,1942,175,[94,94,86,93,45,79]],
+["Franco Baresi","巴雷西","意大利","DC",93,1960,176,[70,49,76,72,95,82]],
+["George Best","乔治·贝斯特","北爱尔兰","MR",93,1946,175,[93,91,84,94,58,71]],
+["Lothar Matthäus","马特乌斯","德国","MC",93,1961,174,[89,89,90,82,90,85]],
+["Marco van Basten","范巴斯滕","荷兰","ST",93,1964,188,[83,94,76,89,39,75]],
+["Roberto Baggio","巴乔","意大利","AM",93,1967,174,[86,84,92,92,40,61]],
+["Ruud Gullit","古利特","荷兰","ST",93,1962,191,[86,91,91,89,82,90]],
+["Thierry Henry","亨利","法国","ST",93,1977,188,[94,91,83,90,53,80]],
+["Alessandro Del Piero","皮耶罗","意大利","ST",92,1974,174,[83,92,89,92,43,67]],
+["Alessandro Nesta","内斯塔","意大利","DC",92,1976,187,[72,42,65,67,94,86]],
+["Andrea Pirlo","皮尔洛","意大利","MC",92,1979,177,[90,86,92,94,41,67]],
+["Bobby Charlton","博比·查尔顿","英格兰","AM",92,1937,173,[90,91,87,91,50,74]],
+["Bobby Moore","博比·摩尔","英格兰","DC",92,1941,178,[68,64,83,78,93,85]],
+["Carles Puyol","普约尔","西班牙","DC",92,1978,178,[70,45,68,58,94,90]],
+["Dennis Bergkamp","博格坎普","荷兰","ST",92,1969,183,[84,91,86,90,37,78]],
+["Emilio Butragueño","布特拉格尼奥","西班牙","ST",92,1963,168,[94,90,80,92,41,68]],
+["Fabio Cannavaro","卡纳瓦罗","意大利","DC",92,1973,176,[90,80,90,91,44,67]],
+["Ferenc Puskás","普斯卡什","匈牙利","ST",92,1927,172,[90,94,89,91,45,74]],
+["Franz Beckenbauer","贝肯鲍尔","德国","DC",92,1945,181,[82,72,88,86,92,82]],
+["Gary Lineker","莱因克尔","英格兰","ST",92,1960,177,[88,91,73,86,36,76]],
+["Gerd Müller","盖德·穆勒","德国","ST",92,1945,176,[87,92,76,85,44,74]],
+["Hristo Stoichkov","斯托伊奇科夫","保加利亚","ST",92,1966,178,[92,93,86,92,50,86]],
+["Hugo Sánchez","乌戈·桑切斯","墨西哥","ST",92,1958,176,[73,80,95,91,71,67]],
+["Javier Zanetti","萨内蒂","阿根廷","DR",92,1973,178,[86,63,88,85,90,81]],
+["Kenny Dalglish","达格利什","苏格兰","ST",92,1951,173,[92,93,81,90,44,75]],
+["Luís Figo","菲戈","葡萄牙","MR",92,1972,180,[92,88,89,92,41,80]],
+["Peter Schmeichel","舒梅切尔","丹麦","GK",92,1963,193,[92,87,88,94,52,90]],
+["Raúl","劳尔","西班牙","ST",92,1977,180,[80,43,63,68,95,85]],
+["Rivaldo","里瓦尔多","巴西","ML",92,1972,186,[87,91,88,92,44,78]],
+["Ruud van Nistelrooy","范尼斯特鲁伊","荷兰","ST",92,1976,188,[86,91,74,85,37,82]],
+["Ryan Giggs","吉格斯","威尔士","ML",92,1973,179,[90,92,77,90,41,73]],
+["Alan Shearer","希勒","英格兰","ST",91,1970,182,[84,90,91,90,45,84]],
+["Andriy Shevchenko","舍甫琴科","乌克兰","ST",91,1976,183,[91,86,88,92,36,79]],
+["Cafu","卡福","巴西","DR",91,1970,176,[90,56,83,85,88,83]],
+["Clarence Seedorf","西多夫","荷兰","AM",91,1976,176,[72,87,91,80,64,82]],
+["David Trezeguet","特雷泽盖","法国","ST",91,1977,187,[83,80,82,85,90,91]],
+["Didier Drogba","德罗巴","科特迪瓦","ST",91,1978,189,[76,86,92,87,61,78]],
+["Edwin van der Sar","范德萨","荷兰","GK",91,1970,197,[85,90,81,89,40,95]],
+["Fernando Hierro","耶罗","西班牙","DC",91,1968,187,[91,86,88,92,44,73]],
+["Gheorghe Hagi","哈吉","罗马尼亚","AM",91,1965,172,[83,52,66,67,90,90]],
+["Gianluigi Buffon","布冯","意大利","GK",91,1978,192,[92,90,78,93,52,91]],
+["Ian Rush","伊恩·拉什","威尔士","ST",91,1961,180,[92,83,84,81,86,86]],
+["Kaká","卡卡","巴西","AM",91,1982,186,[90,92,77,82,47,90]],
+["Laurent Blanc","布兰","法国","DC",91,1965,192,[93,93,88,90,42,74]],
+["Marcel Desailly","德塞利","法国","DC",91,1968,185,[79,69,70,78,92,86]],
+["Michael Ballack","巴拉克","德国","MC",91,1976,188,[81,92,70,82,45,80]],
+["Michael Laudrup","米歇尔·劳德鲁普","丹麦","AM",91,1964,183,[75,88,89,80,90,86]],
+["Michael Owen","欧文","英格兰","ST",91,1979,173,[86,88,80,83,41,82]],
+["Miroslav Klose","克洛泽","德国","ST",91,1978,184,[69,48,74,70,94,80]],
+["Patrick Kluivert","克鲁伊维特","荷兰","ST",91,1976,188,[83,89,90,90,43,65]],
+["Patrick Vieira","维埃拉","法国","MC",91,1976,192,[88,92,72,87,34,75]],
+["Paul Scholes","斯科尔斯","英格兰","MC",91,1974,171,[88,88,76,82,41,81]],
+["Pavel Nedvěd","内德维德","捷克","ML",91,1972,177,[81,93,77,78,52,85]],
+["Robert Pirès","皮雷","法国","ML",91,1973,187,[90,89,70,88,34,67]],
+["Roberto Carlos","罗伯特·卡洛斯","巴西","DL",91,1973,168,[85,79,90,92,38,64]],
+["Ronald Koeman","科曼","荷兰","DC",91,1963,181,[73,68,76,70,93,87]],
+["Steven Gerrard","杰拉德","英格兰","MC",91,1980,183,[79,92,75,87,40,70]],
+["Sócrates","苏格拉底","巴西","AM",91,1954,192,[80,87,90,88,68,82]],
+["Zico","济科","巴西","AM",91,1953,172,[89,92,91,91,62,71]],
+["Christian Vieri","维埃里","意大利","ST",90,1973,185,[90,88,85,87,51,77]],
+["Claude Makélélé","马克莱莱","法国","DM",90,1973,174,[90,83,88,93,41,67]],
+["Deco","德科","葡萄牙","MC",90,1977,174,[83,91,74,83,40,84]],
+["Emmanuel Petit","珀蒂","法国","DM",90,1970,185,[87,83,84,94,40,60]],
+["Filippo Inzaghi","因扎吉","意大利","ST",90,1973,181,[83,49,67,65,91,86]],
+["Frank Lampard","兰帕德","英格兰","MC",90,1978,184,[85,76,81,82,90,90]],
+["Frank Rijkaard","里杰卡尔德","荷兰","DM",90,1962,187,[95,82,81,89,47,67]],
+["Gianfranco Zola","佐拉","意大利","ST",90,1966,168,[77,60,70,72,90,86]],
+["Henrik Larsson","拉尔森","瑞典","ST",90,1971,178,[92,88,74,89,48,70]],
+["Hernán Crespo","克雷斯波","阿根廷","ST",90,1975,184,[82,88,72,82,38,80]],
+["Iker Casillas","卡西利亚斯","西班牙","GK",90,1981,185,[90,88,84,93,59,88]],
+["Jari Litmanen","利特马宁","芬兰","AM",90,1971,182,[79,91,69,83,36,65]],
+["Jay-Jay Okocha","奥科查","尼日利亚","AM",90,1973,173,[90,89,76,85,48,73]],
+["Jens Lehmann","莱曼","德国","GK",90,1969,190,[87,91,86,86,59,90]],
+["Juan Sebastián Verón","贝隆","阿根廷","MC",90,1975,186,[78,65,88,81,88,83]],
+["Luis Hernández","路易斯·埃尔南德斯","墨西哥","ST",90,1968,175,[83,79,91,90,51,70]],
+["Marc Overmars","奥维马斯","荷兰","ML",90,1973,173,[82,89,84,84,36,64]],
+["Michael Essien","埃辛","加纳","DM",90,1982,177,[75,79,93,90,68,65]],
+["Pep Guardiola","瓜迪奥拉","西班牙","DM",90,1971,180,[87,90,79,89,42,71]],
+["Rio Ferdinand","费迪南德","英格兰","DC",90,1978,189,[89,90,72,89,38,73]],
+["Roy Keane","罗伊·基恩","爱尔兰","MC",90,1971,180,[77,76,83,80,90,87]],
+["Rui Costa","鲁伊·科斯塔","葡萄牙","AM",90,1972,180,[77,79,82,78,87,89]],
+["Xavi","哈维","西班牙","MC",90,1980,170,[80,76,92,90,69,69]],
+["Abedi Pele","阿贝迪·贝利","加纳","AM",89,1964,174,[91,83,87,91,48,66]],
+["David Ginola","吉诺拉","法国","ML",89,1967,186,[90,88,87,91,55,84]],
+["Eric Cantona","坎通纳","法国","ST",89,1966,188,[86,89,86,89,50,88]],
+["Fernando Morientes","莫伦特斯","西班牙","ST",89,1976,186,[84,90,77,83,45,86]],
+["Gennaro Gattuso","加图索","意大利","DM",89,1978,177,[85,87,89,89,40,65]],
+["Gianluca Vialli","维亚利","意大利","ST",89,1964,180,[86,89,72,83,42,79]],
+["Gianluca Zambrotta","赞布罗塔","意大利","DR",89,1977,181,[85,90,75,80,46,88]],
+["Ian Wright","伊恩·赖特","英格兰","ST",89,1963,175,[90,88,78,88,41,70]],
+["Jairzinho","雅伊尔津霍","巴西","MR",89,1944,173,[91,89,84,90,49,73]],
+["Jean-Pierre Papin","帕潘","法国","ST",89,1963,176,[83,93,73,83,44,76]],
+["John Barnes","约翰·巴恩斯","英格兰","ML",89,1963,182,[85,82,87,90,43,70]],
+["Jürgen Kohler","科勒","德国","DC",89,1965,186,[71,51,63,62,91,90]],
+["Lúcio","卢西奥","巴西","DC",89,1978,188,[82,72,74,77,91,89]],
+["Philipp Lahm","拉姆","德国","DR",89,1983,170,[84,68,83,83,86,70]],
+["Rudi Völler","沃勒尔","德国","ST",89,1960,180,[89,90,76,86,47,85]],
+["Samuel Eto'o","埃托奥","喀麦隆","ST",89,1981,179,[92,90,79,87,45,80]],
+["Sol Campbell","坎贝尔","英格兰","DC",89,1974,188,[84,90,75,78,48,84]],
+["Antonio Di Natale","迪纳塔莱","意大利","ST",88,1977,170,[90,91,85,90,46,70]],
+["Bastian Schweinsteiger","施魏因施泰格","德国","MC",88,1984,183,[76,83,86,83,83,83]],
+["Bixente Lizarazu","利扎拉祖","法国","DL",88,1969,169,[87,59,80,82,83,82]],
+["Carlos Tevez","特维斯","阿根廷","ST",88,1984,171,[85,89,80,86,46,89]],
+["David Beckham","贝克汉姆","英格兰","MR",88,1975,182,[80,85,92,85,66,79]],
+["Diego Forlán","弗兰","乌拉圭","ST",88,1979,180,[86,90,79,85,55,76]],
+["Diego Milito","迭戈·米利托","阿根廷","ST",88,1979,183,[83,89,75,84,43,80]],
+["Eden Hazard","阿扎尔","比利时","ML",88,1991,175,[88,83,85,92,35,68]],
+["Enzo Francescoli","弗朗西斯科利","乌拉圭","ST",88,1961,181,[86,88,83,90,44,72]],
+["Franck Ribéry","里贝里","法国","ML",88,1983,170,[89,85,85,90,37,65]],
+["Gareth Bale","贝尔","威尔士","MR",88,1989,186,[93,88,82,87,45,75]],
+["Hidetoshi Nakata","中田英寿","日本","AM",88,1977,175,[89,85,82,91,36,54]],
+["Javier Mascherano","马斯切拉诺","阿根廷","DC",88,1984,174,[76,55,76,75,89,86]],
+["Juan Román Riquelme","里克尔梅","阿根廷","AM",88,1978,183,[71,84,90,90,33,66]],
+["Lilian Thuram","图拉姆","法国","DR",88,1972,182,[85,45,72,76,90,86]],
+["Maicon","麦孔","巴西","DR",88,1981,184,[87,70,82,84,84,84]],
+["Mario Gómez","马里奥·戈麦斯","德国","ST",88,1985,189,[83,90,73,82,43,83]],
+["Paulo Futre","富特雷","葡萄牙","ML",88,1966,175,[93,81,80,93,37,58]],
+["Petr Čech","切赫","捷克","GK",88,1982,196,[86,85,76,88,54,90]],
+["Rafael Márquez","马克斯","墨西哥","DC",88,1979,184,[74,65,75,74,90,88]],
+["Ricardo Carvalho","卡瓦略","葡萄牙","DC",88,1978,183,[77,56,71,73,91,82]],
+["Robin van Persie","范佩西","荷兰","ST",88,1983,187,[84,91,84,87,45,73]],
+["Vincent Kompany","孔帕尼","比利时","DC",88,1986,190,[80,60,68,70,90,86]],
+["Wayne Rooney","鲁尼","英格兰","ST",88,1985,176,[88,90,81,86,53,87]],
+["Wesley Sneijder","斯内德","荷兰","AM",88,1984,171,[81,84,90,86,53,75]],
+["Claudio Marchisio","马尔基西奥","意大利","MC",87,1986,180,[82,81,85,86,80,82]],
+["Davor Šuker","苏克","克罗地亚","ST",87,1968,183,[83,89,79,88,43,75]],
+["Dimitar Berbatov","贝尔巴托夫","保加利亚","ST",87,1981,189,[80,85,81,87,34,74]],
+["Fernando Torres","托雷斯","西班牙","ST",87,1984,186,[89,87,75,85,43,75]],
+["Harry Kewell","科威尔","澳大利亚","ML",87,1978,180,[90,85,88,88,52,69]],
+["Iván Córdoba","科尔多巴","哥伦比亚","DC",87,1976,173,[86,63,65,68,90,87]],
+["Jaap Stam","斯塔姆","荷兰","DC",87,1972,191,[78,45,62,64,90,90]],
+["Joe Cole","乔·科尔","英格兰","MR",87,1981,176,[88,84,86,90,51,72]],
+["Jorge Campos","坎波斯","墨西哥","GK",87,1966,170,[93,83,81,90,84,80]],
+["Marek Hamšík","哈姆西克","斯洛伐克","AM",87,1987,183,[78,84,87,87,60,72]],
+["Nemanja Vidić","维迪奇","塞尔维亚","DC",87,1981,190,[78,48,62,62,90,89]],
+["Steve McManaman","麦克马纳曼","英格兰","MR",87,1972,183,[89,77,84,87,46,77]],
+["Tomas Brolin","布罗林","瑞典","ST",87,1969,176,[87,88,83,90,59,69]],
+["Xabi Alonso","哈维·阿隆索","西班牙","DM",87,1981,183,[71,77,86,78,83,80]],
+["Yaya Touré","亚亚·图雷","科特迪瓦","DM",87,1983,188,[78,83,86,84,80,89]],
+["Zé Roberto","泽·罗伯托","巴西","ML",87,1974,172,[86,76,84,87,70,76]],
+["Aleksandr Mostovoi","莫斯托沃伊","俄罗斯","AM",86,1968,177,[78,83,86,88,62,77]],
+["Ashley Cole","阿什利·科尔","英格兰","DL",86,1980,176,[87,65,79,80,84,77]],
+["Blaise Matuidi","马图伊迪","法国","DM",86,1987,180,[82,72,80,80,84,86]],
+["Dirk Kuyt","库伊特","荷兰","AM",86,1980,183,[84,88,80,83,70,82]],
+["Freddie Ljungberg","永贝里","瑞典","ML",86,1977,175,[87,81,82,86,45,77]],
+["Guti","古蒂","西班牙","MC",86,1976,185,[76,80,90,87,48,64]],
+["Jamie Carragher","卡拉格","英格兰","DC",86,1978,185,[72,40,62,60,90,84]],
+["Jerzy Dudek","杜德克","波兰","GK",86,1973,187,[86,83,78,90,60,85]],
+["Joan Capdevila","卡普德维拉","西班牙","DL",86,1978,182,[84,76,81,79,85,80]],
+["John Arne Riise","里瑟","挪威","DL",86,1980,188,[83,81,81,80,81,86]],
+["Landon Donovan","多诺万","美国","ST",86,1982,173,[89,86,81,85,46,70]],
+["Ledley King","莱德利·金","英格兰","DC",86,1980,188,[80,55,69,72,89,80]],
+["Ludovic Giuly","久利","法国","MR",86,1976,164,[88,83,81,85,49,58]],
+["Nwankwo Kanu","卡努","尼日利亚","ST",86,1976,196,[79,85,81,87,40,75]],
+["Ole Gunnar Solskjær","索尔斯克亚","挪威","ST",86,1973,178,[85,88,75,84,45,66]],
+["Park Ji-sung","朴智星","韩国","ML",86,1981,178,[85,80,83,85,78,81]],
+["Ramires","拉米雷斯","巴西","DM",86,1987,179,[88,78,80,81,84,83]],
+["Robbie Keane","罗比·基恩","爱尔兰","ST",86,1980,175,[87,88,76,88,45,76]],
+["Sami Al-Jaber","贾比尔","沙特阿拉伯","ST",86,1972,177,[88,86,75,83,44,71]],
+["Sidney Govou","戈武","法国","ST",86,1979,175,[89,89,80,88,55,70]],
+["Tomáš Rosický","罗西茨基","捷克","AM",86,1980,178,[83,81,86,88,57,69]],
+["Włodzimierz Smolarek","斯莫拉雷克","波兰","ST",86,1957,171,[91,85,80,90,41,83]],
+["Clint Dempsey","登普西","美国","AM",85,1983,185,[82,86,81,85,47,80]],
+["DaMarcus Beasley","比斯利","美国","ML",85,1982,173,[91,77,79,86,73,74]],
+["Lars Ricken","里肯","德国","AM",85,1976,178,[83,85,80,83,58,65]],
+["Mohammed Noor","穆罕默德·努尔","沙特阿拉伯","AM",85,1978,186,[82,80,85,87,50,68]],
+["Peter Crouch","克劳奇","英格兰","ST",85,1981,201,[74,87,75,78,52,80]],
+["Saeed Al-Owairan","奥维兰","沙特阿拉伯","MR",85,1967,184,[94,82,80,86,35,72]],
+["Tim Cahill","卡希尔","澳大利亚","ST",85,1979,178,[80,85,76,81,62,86]],
+["Tim Howard","蒂姆·霍华德","美国","GK",85,1979,191,[86,84,78,88,48,84]]
+];
+
+const LEG_MAP=[["pace","accel"],["finishing","longshot","composure"],["passing","vision","crossing","setpiece"],
+  ["dribbling","technique","agility","flair"],["tackling","marking","positioning","heading"],["strength","stamina","jumping","aggression"]];
+const LEG_MAP_GK=[["reflex"],["handling"],["gkkick"],["reflex","oneonone"],["pace","accel"],["command","positioning"]];
+function makeLegendYouth(clubId, ageMin, ageMax){
+  const used=WORLD.legendsUsed||(WORLD.legendsUsed=[]);
+  const pool=LEGENDS.filter(r=>!used.includes(r[0]));
+  if(!pool.length) return null;
+  const L=pick(pool); used.push(L[0]);
+  const [en,cn,natCn,pos,ovr,born,height,v]=L;
+  const age=ri(ageMin,ageMax);
+  const pa=Math.min(200,ovr*2);
+  // 青年时代：当前能力约为巅峰的 33%~42%，年长一岁略高一点
+  const lvl=clamp(Math.round(pa*(0.33+rnd()*0.09)+(age-16)*3),40,110);
+  const p=makePlayer(lvl,pos,age,clubId);
+  const maps=pos==="GK"? LEG_MAP_GK : LEG_MAP;
+  maps.forEach((keys,i)=>{ const f=clamp(v[i]/ovr,0.45,1.1);
+    keys.forEach(k=>{ p.a[k]=clamp(Math.round(p.a[k]*(0.55+f*0.6)),1,20); }); });
+  fitAttrsToOverall(p.a,pos,lvl);
+  p.ca=calcCA(p.a,pos); p.pa=Math.max(pa,p.ca+40);
+  const parts=cn.split("·");
+  p.name=en; p.first=parts.length>1?parts[0]:""; p.last=parts[parts.length-1]; p.cn=cn; p.nat=natCn;
+  p.legend=true; p.pos2=[]; const near=POS_NEAR[pos]||[]; if(near.length) p.pos2=[pick(near)];
+  return p;
+}
+function spawnLegendYouths(){
+  const n=(rnd()<0.6?1:0)+(rnd()<0.25?1:0);
+  for(let i=0;i<n;i++){
+    const cands=WORLD.clubs.filter(x=>x.squad.length<34);
+    if(!cands.length) return;
+    const uc=cands.find(x=>x.id===WORLD.userClub);
+    const c=(uc&&rnd()<0.18)? uc : pick(cands);
+    const p=makeLegendYouth(c.id,16,17); if(!p) return;
+    p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep)*0.35/50)*50); p.contract=WORLD.season+3;
+    WORLD.players[p.id]=p; c.squad.push(p.id); p.value=calcValue(p);
+    if(c.id===WORLD.userClub)
+      news("青训营的惊喜",`青训主管特别提到一名叫 ${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.nat}）的少年："我从没见过这样的天赋。"`,"good");
+  }
+}
+function spawnLegendFA(quiet){
+  const p=makeLegendYouth(-1,17,19); if(!p) return null;
+  p.wage=marketWage(p); p.contract=WORLD.season; p.value=Math.round(calcValue(p)*0.4);
+  WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
+  if(!quiet) news("球探简报：无合同少年",
+    `球探在业余联赛注意到一名叫 ${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.nat}）的自由身少年，尚无职业合同，据说已有多家俱乐部在打听。`,"good");
+  return p;
+}
+
 // ---------- 青训 ----------
 function youthIntake(){
   WORLD.clubs.forEach(c=>{
@@ -2971,6 +3230,7 @@ function youthIntake(){
       news("青年球员入队",`本赛季青训营送来 ${n} 名年轻球员。青训主管认为 ${best.cn}（${POS_CN[best.pos]}，${best.age}岁）最具潜力。`,"good");
     }
   });
+  spawnLegendYouths();
   spawnWonderkids(ri(2,4));
   // 青训与妖人是被动入队，不该把俱乐部顶破工资预算——差额由董事会追加
   WORLD.clubs.forEach(c=>{
@@ -3507,7 +3767,7 @@ function showPlayer(pid){
     <div style="flex:0 0 210px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         ${club?crestHTML(club,34):'<span class="crest" style="width:34px;height:34px;background:#333">FA</span>'}
-        <div><b style="font-size:15px">${esc(p.cn)}</b><div class="hint">${esc(p.name)}</div></div>
+        <div><b style="font-size:15px">${esc(p.cn)}</b>${p.legend&&(own||know>=95)?' <span class="tag" style="background:#6b4e00;color:#ffd24a">传奇之种</span>':''}<div class="hint">${esc(p.name)}</div></div>
       </div>
       <table style="font-size:12px;width:100%">
         <tr><td class="hint">俱乐部</td><td>${club?esc(club.cn):"自由球员"}</td></tr>
@@ -4545,7 +4805,7 @@ function batchImport(files){
 /* =========================================================
    比赛日界面 + 2D 俯视球场渲染
    ========================================================= */
-let ANIM={raf:0, playing:false, speed:2, acc:0, last:0, prev:null, cur:null, evShown:0, ended:false};
+let ANIM={raf:0, playing:false, speed:1, acc:0, last:0, prev:null, cur:null, evShown:0, ended:false, trail:[], cap:null};
 const SPEEDS=[["0.5×",0.5],["1×",1],["2×",2],["4×",4],["8×",8]];
 const PHASE_MS=230;
 
@@ -4554,7 +4814,7 @@ function startUserMatch(fx){
   if(CURMATCH && CURMATCH.h===fx.home && CURMATCH.a===fx.away){ VIEW="match"; render(); return; }
   const side = fx.home===WORLD.userClub?0:1;
   CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round, record:true, userSide:side, ...knockoutOpts(fx)});
-  ANIM={raf:0,playing:false,speed:2,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false};
+  ANIM={raf:0,playing:false,speed:(WORLD.settings&&WORLD.settings.matchSpeed)||1,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false,trail:[],cap:null};
   VIEW="match"; render();
   setTimeout(()=>toggleplay(true),350);
 }
@@ -4606,7 +4866,8 @@ function bindMatchControls(){
     $("#btn-tac").onclick=()=>tacDialog();
     $("#btn-done").onclick=()=>completeMatch();
     document.querySelectorAll(".spd").forEach(b=>b.onclick=()=>{
-      ANIM.speed=+b.dataset.s; document.querySelectorAll(".spd").forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
+      ANIM.speed=+b.dataset.s; if(WORLD.settings) WORLD.settings.matchSpeed=ANIM.speed;
+      document.querySelectorAll(".spd").forEach(x=>x.classList.remove("on")); b.classList.add("on"); });
     drawPitch(); refreshMatchUI();
     // 比赛已结束时重建视图（旋转屏幕、切页返回等）：必须重新露出「完成比赛」按钮
     if(CURMATCH && CURMATCH.done){ ANIM.ended=true; ANIM.playing=false; onMatchEnd(); }
@@ -4618,7 +4879,7 @@ function toggleplay(force){
   ANIM.playing = force!=null? force : !ANIM.playing;
   b.textContent=ANIM.playing?"⏸ 暂停":"▶ 继续";
   if(ANIM.playing){ ANIM.last=performance.now(); ANIM.raf=requestAnimationFrame(animLoop); }
-  else cancelAnimationFrame(ANIM.raf);
+  else { cancelAnimationFrame(ANIM.raf); drawPitch(1); }
 }
 function animLoop(ts){
   const M=CURMATCH; if(!M||VIEW!=="match"){ ANIM.playing=false; return; }
@@ -4627,11 +4888,12 @@ function animLoop(ts){
   let steps=0;
   while(ANIM.acc>=PHASE_MS && !M.done && steps<40){
     ANIM.prev=ANIM.cur;
-    const before=M.score[0]+M.score[1];
+    const before=M.score[0]+M.score[1], ev0=M.events.length;
     stepMatch(M);
     ANIM.cur=M.frames[M.frames.length-1];
     ANIM.acc-=PHASE_MS; steps++;
-    if(M.score[0]+M.score[1]>before) flashGoal();
+    if(M.events.length>ev0){ const e=M.events[M.events.length-1]; ANIM.cap={text:e.text,cls:e.cls||e.type,at:performance.now()}; }
+    if(M.score[0]+M.score[1]>before){ const g=M.events.slice().reverse().find(e=>e.type==="goal"); flashGoal(g?g.text.replace(/^⚽ 进球！/,"").replace(/\s+\d+-\d+$/,""):""); }
   }
   if(M.done && !ANIM.ended){ ANIM.ended=true; ANIM.playing=false;
     cancelAnimationFrame(ANIM.raf); onMatchEnd(); drawPitch(1); refreshMatchUI(); return; }
@@ -4646,8 +4908,9 @@ function skipMatch(){
   let g=0; while(!M.done && g++<20000) stepMatch(M);
   ANIM.ended=true; onMatchEnd(); refreshMatchUI();
 }
-function flashGoal(){
+function flashGoal(txt){
   const f=$("#goalflash"); if(!f) return;
+  f.innerHTML=`<div style="text-align:center">GOAL!${txt?`<div style="font-size:15px;letter-spacing:1px;font-weight:600;margin-top:6px">${esc(txt)}</div>`:""}</div>`;
   f.style.display="flex"; f.style.opacity=1;
   setTimeout(()=>{ f.style.transition=".5s"; f.style.opacity=0;
     setTimeout(()=>{f.style.display="none";f.style.transition="";},520); },700);
@@ -4717,11 +4980,12 @@ function refreshMatchUI(){
     }
     ANIM.evShown=M.events.length; fd.scrollTop=fd.scrollHeight;
   }
+  const bs=$("#btn-sub"); if(bs && M.userSide>=0) bs.textContent=`🔁 换人 (${5-M.subsMade[M.userSide]})`;
   const pl=$("#m-players");
   if(pl){
-    const mk=side=>`<div class="col"><div class="hint" style="margin-bottom:3px">${esc(C(side===0?M.h:M.a).cn)}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${M.teams[side].men.filter(m=>!m.off).map(m=>
-        `<span class="pill" style="font-size:10px;${m.cond<60?'border-color:#f0a020':''}">${POS_CN[m.pos]} ${esc(nm(m))}
+    const mk=side=>`<div class="col"><div class="hint" style="margin-bottom:3px">${esc(C(side===0?M.h:M.a).cn)}${side===M.userSide?' <span style="opacity:.6">（点球员可直接换人）</span>':''}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${M.teams[side].men.filter(m=>!m.off).map((m,i)=>
+        `<span class="pill" ${side===M.userSide&&!M.done?`onclick="subDialog(${i})" title="换下 ${esc(nm(m))}"`:""} style="font-size:10px;${side===M.userSide&&!M.done?'cursor:pointer;':''}${m.cond<60?'border-color:#f0a020':''}">${POS_CN[m.pos]} ${esc(nm(m))}
          <b style="color:${m.cond>70?'#00d47e':m.cond>50?'#f0a020':'#e5484d'}">${Math.round(m.cond)}</b>
          <span style="color:var(--gold)">${m.rating.toFixed(1)}</span>${m.goals?" ⚽".repeat(m.goals):""}${m.yellow?" 🟨":""}</span>`).join("")}</div></div>`;
     pl.className="row"; pl.innerHTML=mk(0)+mk(1);
@@ -4756,22 +5020,60 @@ function drawPitch(alpha){
   });
   if(!M) return;
   const a = alpha==null?1:alpha;
+  const now=performance.now();
+  const fs=clamp(W/(cv.clientWidth||W),1,2.2);           // 小屏上字幕按显示比例放大
+  const ease=t=>t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;      // 球员位移缓动
   const A=ANIM.prev, B=ANIM.cur;
-  let ball, pts;
+  const kind=(B&&B.k)||"";
+  const flight=kind==="pass"||kind==="cross"||kind==="shoot";
+  let ball, pts, dist=0;
   if(B&&A&&A.p.length===B.p.length){
-    ball={x:A.b.x+(B.b.x-A.b.x)*a, y:A.b.y+(B.b.y-A.b.y)*a};
-    pts=B.p.map((q,i)=>[A.p[i][0]+(q[0]-A.p[i][0])*a, A.p[i][1]+(q[1]-A.p[i][1])*a]);
+    const ea=ease(a), ba=flight? Math.min(1,a*1.15) : ea;   // 传射直线匀速略快，带球随人缓动
+    ball={x:A.b.x+(B.b.x-A.b.x)*ba, y:A.b.y+(B.b.y-A.b.y)*ba};
+    dist=Math.hypot(B.b.x-A.b.x,B.b.y-A.b.y);
+    pts=B.p.map((q,i)=>[A.p[i][0]+(q[0]-A.p[i][0])*ea, A.p[i][1]+(q[1]-A.p[i][1])*ea]);
   } else if(B){ ball=B.b; pts=B.p; }
   else { ball=M.ball; pts=M.teams.flatMap(T=>T.men.filter(m=>!m.off).map(m=>[m.x,m.y])); }
   const men=M.teams.flatMap((T,s)=>T.men.filter(m=>!m.off).map(m=>({m,s})));
+  const ownerIdx = (B&&B.o!=null&&B.o>=0)? B.o : men.findIndex(i=>i.m===M.ballOwner);
+  // 控球方提示（顶部小角标）
+  if(B){ const pc=C(B.s===0?M.h:M.a);
+    ctx.fillStyle="rgba(0,0,0,.45)"; ctx.fillRect(mx+6,my+6,118*fs,20*fs);
+    ctx.fillStyle=pc.c1; ctx.beginPath(); ctx.arc(mx+6+11*fs,my+6+10*fs,6*fs,0,6.2832); ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle="#fff"; ctx.font=`bold ${11*fs}px -apple-system,sans-serif`; ctx.textAlign="left"; ctx.textBaseline="middle";
+    ctx.fillText((B.s===0?"◀ ":"")+pc.short+" 控球"+(B.s===1?" ▶":""), mx+6+22*fs, my+6+10*fs); }
+  // 球路：传球 / 传中 / 射门 / 带球
+  if(A&&B&&dist>4&&(flight||kind==="drib")){
+    const col= kind==="shoot"?"255,90,90":kind==="cross"?"255,220,90":"255,255,255";
+    ctx.save(); ctx.setLineDash(kind==="drib"?[2,6]:[7,5]); ctx.lineWidth=kind==="shoot"?2.6:1.5;
+    ctx.strokeStyle=`rgba(${col},${(0.6*(1-a*0.5)).toFixed(2)})`;
+    ctx.beginPath(); ctx.moveTo(X(A.b.x),Y(A.b.y)); ctx.lineTo(X(ball.x),Y(ball.y)); ctx.stroke(); ctx.restore();
+    if(kind==="shoot"){ ctx.fillStyle=`rgba(255,90,90,${(0.5*(1-a)).toFixed(2)})`; ctx.beginPath(); ctx.arc(X(A.b.x),Y(A.b.y),9+a*10,0,6.2832); ctx.fill(); }
+  }
+  // 球的拖尾
+  const tr=ANIM.trail||(ANIM.trail=[]);
+  const lt=tr[tr.length-1];
+  if(!lt||Math.hypot(lt[0]-ball.x,lt[1]-ball.y)>0.35) tr.push([ball.x,ball.y]);
+  if(tr.length>16) tr.splice(0,tr.length-16);
+  tr.forEach((q,i)=>{ const f=(i+1)/tr.length; ctx.fillStyle=`rgba(255,255,255,${(0.06+f*0.22).toFixed(2)})`;
+    ctx.beginPath(); ctx.arc(X(q[0]),Y(q[1]),1.2+f*2.4,0,6.2832); ctx.fill(); });
   // 阴影
   pts.forEach((q,i)=>{ if(!men[i])return;
     ctx.fillStyle="rgba(0,0,0,.34)"; ctx.beginPath(); ctx.arc(X(q[0])+2,Y(q[1])+3,10,0,6.2832); ctx.fill(); });
   pts.forEach((q,i)=>{
     const info=men[i]; if(!info) return;
     const club=C(info.s===0?M.h:M.a);
-    const isOwner = M.ballOwner===info.m;
-    ctx.beginPath(); ctx.arc(X(q[0]),Y(q[1]), info.m.pos==="GK"?10:11, 0, 6.2832);
+    const isOwner = i===ownerIdx;
+    const r=info.m.pos==="GK"?10:11, cx=X(q[0]), cy=Y(q[1]);
+    // 体能环
+    const cond=info.m.cond;
+    ctx.beginPath(); ctx.arc(cx,cy,r+3.2,-Math.PI/2,-Math.PI/2+6.2832*cond/100);
+    ctx.strokeStyle= cond>70?"rgba(0,212,126,.8)":cond>50?"rgba(240,160,32,.85)":"rgba(229,72,77,.95)"; ctx.lineWidth=2.2; ctx.stroke();
+    // 持球人光圈（呼吸）
+    if(isOwner){ const pulse=0.5+0.5*Math.sin(now/140);
+      ctx.beginPath(); ctx.arc(cx,cy,r+7+pulse*3,0,6.2832); ctx.strokeStyle=`rgba(255,255,255,${(0.35+pulse*0.35).toFixed(2)})`; ctx.lineWidth=2; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(cx,cy, r, 0, 6.2832);
     ctx.fillStyle= info.m.pos==="GK"? "#f0e14a" : club.c1;
     ctx.fill();
     ctx.lineWidth= isOwner?3.2:1.6;
@@ -4779,51 +5081,123 @@ function drawPitch(alpha){
     ctx.stroke();
     ctx.fillStyle= info.m.pos==="GK"? "#111" : club.c2;
     ctx.font="bold 10px -apple-system,sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText(String(POSITIONS.indexOf(info.m.pos)+1), X(q[0]), Y(q[1]));
+    ctx.fillText(String(POSITIONS.indexOf(info.m.pos)+1), cx, cy);
+    // 黄牌 / 受伤标记
+    if(info.m.yellow){ ctx.fillStyle="#ffd24a"; ctx.fillRect(cx+r-3,cy-r-4,5,7); }
     // 名字
-    ctx.fillStyle="rgba(255,255,255,.78)"; ctx.font="9px -apple-system,sans-serif";
-    ctx.fillText(nm(info.m).slice(0,4), X(q[0]), Y(q[1])+19);
+    ctx.fillStyle="rgba(255,255,255,.82)"; ctx.font="9.5px -apple-system,sans-serif";
+    ctx.fillText(nm(info.m).slice(0,4), cx, cy+20);
   });
-  // 球
-  ctx.beginPath(); ctx.arc(X(ball.x),Y(ball.y),6.2,0,6.2832);
+  // 球（传中/远传/射门时带弧线高度）
+  let lift=0;
+  if(A&&flight&&dist>10) lift=Math.sin(Math.PI*Math.min(1,a*1.15))*Math.min(1,dist/38)*(kind==="shoot"?0.5:1);
+  const bx=X(ball.x), by=Y(ball.y);
+  ctx.fillStyle="rgba(0,0,0,.35)"; ctx.beginPath(); ctx.arc(bx+2+lift*6,by+3+lift*10,5.2,0,6.2832); ctx.fill();
+  const br=6.2*(1+lift*0.9);
+  ctx.beginPath(); ctx.arc(bx,by-lift*24,br,0,6.2832);
   ctx.fillStyle="#ffffff"; ctx.fill();
   ctx.lineWidth=1.5; ctx.strokeStyle="#111"; ctx.stroke();
+  ctx.beginPath(); ctx.arc(bx-br*0.3,by-lift*24-br*0.3,br*0.28,0,6.2832); ctx.fillStyle="#111"; ctx.fill();
+  // 事件字幕（底部居中，淡入淡出）
+  if(ANIM.cap){
+    const age=now-ANIM.cap.at;
+    if(age<2800){
+      const al= age<180? age/180 : age>2300? (2800-age)/500 : 1;
+      const cl=ANIM.cap.cls||"";
+      const col= cl==="goal"?"#00d47e": cl==="chance"?"#ffd24a": cl==="hurt"?"#ff6b6b": cl==="card"?"#ffd24a": cl==="sys"?"#9ab":"#fff";
+      ctx.font=`bold ${15*fs}px -apple-system,sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+      const lim=fs>1.5?22:36;
+      const txt=ANIM.cap.text.length>lim? ANIM.cap.text.slice(0,lim)+"…" : ANIM.cap.text;
+      const tw=ctx.measureText(txt).width+26*fs, th=26*fs;
+      ctx.globalAlpha=al;
+      ctx.fillStyle="rgba(0,0,0,.62)";
+      const rx=W/2-tw/2, ry=H-my-6-th;
+      ctx.beginPath(); ctx.roundRect? ctx.roundRect(rx,ry,tw,th,7) : ctx.rect(rx,ry,tw,th); ctx.fill();
+      ctx.fillStyle=col; ctx.fillText(txt, W/2, ry+th/2);
+      ctx.globalAlpha=1;
+    } else ANIM.cap=null;
+  }
 }
 
 // ---------- 换人 / 临场战术 ----------
-function subDialog(){
-  const M=CURMATCH, side=M.userSide;
-  if(side<0) return;
-  const T=M.teams[side], club=C(T.cid);
+let SUBQ=[], SUBOUT=null, SUBRESUME=false;
+function subDialog(preOut){
+  const M=CURMATCH; if(!M||M.done) return; const side=M.userSide; if(side<0) return;
+  if(ANIM.playing){ toggleplay(false); SUBRESUME=true; } else SUBRESUME=false;
+  SUBQ=[]; SUBOUT=(preOut!=null&&preOut>=0)? preOut : null;
+  renderSubDialog();
+}
+function subLeft(){ const M=CURMATCH; return 5-M.subsMade[M.userSide]-SUBQ.length; }
+function renderSubDialog(){
+  const M=CURMATCH, side=M.userSide, T=M.teams[side], club=C(T.cid);
   const on=T.men.filter(m=>!m.off);
-  const bench=club.subs.filter(id=>!T.benchUsed.includes(id)&&P(id).injury<=0);
-  openModal(`换人（剩余 ${5-M.subsMade[side]} 个名额）`,
-    `<div class="row"><div class="col"><div class="hint" style="margin-bottom:5px">场上球员（点击选择换下）</div>
-      ${on.map((m,i)=>`<div class="clickable" onclick="pickOut(${i})" id="so-${i}"
-        style="display:flex;gap:8px;padding:5px;border-bottom:1px solid #1d242e">
-        <span class="tag t-${POS_GRP[m.pos]}">${POS_CN[m.pos]}</span><span style="flex:1">${esc(nm(m))}</span>
+  const queuedOut=SUBQ.map(q=>q.out), queuedIn=SUBQ.map(q=>q.in);
+  const bench=club.subs.filter(id=>P(id)&&!T.benchUsed.includes(id)&&P(id).injury<=0&&!queuedIn.includes(id));
+  const slots=FORMATIONS[T.form];
+  const outM = SUBOUT!=null? on[SUBOUT]:null;
+  const want = outM? slots[outM.slot][0] : null;
+  const benchSorted=bench.slice().sort((a,b)=> want? playerScore(P(b),want)-playerScore(P(a),want) : ovr(P(b))-ovr(P(a)));
+  const body=`
+   <div class="hint" style="margin-bottom:8px">点左侧要换下的球员，再点右侧替补，可连续配好几组后一并确认。本次还可换 <b style="color:var(--acc)">${subLeft()}</b> 人。</div>
+   <div class="row">
+    <div class="col"><div class="hint" style="margin-bottom:5px">场上球员</div>
+     ${on.map((m,i)=>{ const q=queuedOut.includes(m);
+       return `<div class="clickable" ${q?'':`onclick="pickOut(${i})"`} style="display:flex;gap:8px;padding:5px;border-bottom:1px solid #1d242e;border-radius:4px;${q?'opacity:.35;':''}${SUBOUT===i?'background:#16301f;':''}">
+        <span class="tag t-${POS_GRP[m.pos]}">${POS_CN[m.pos]}</span><span style="flex:1">${esc(nm(m))}${m.yellow?' 🟨':''}</span>
         <span style="color:${m.cond>70?'#00d47e':m.cond>50?'#f0a020':'#e5484d'}">${Math.round(m.cond)}%</span>
-        <span style="color:var(--gold)">${m.rating.toFixed(1)}</span></div>`).join("")}</div>
-    <div class="col"><div class="hint" style="margin-bottom:5px">替补席（点击换上）</div>
-      ${bench.map(id=>{const p=P(id);return `<div class="clickable" onclick="pickIn(${id})"
-        style="display:flex;gap:8px;padding:5px;border-bottom:1px solid #1d242e">
-        <span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span><span style="flex:1">${esc(p.cn)}</span>
-        <b style="color:${caColor(p.ca)}">${ovr(p)}</b><span class="hint">${Math.round(p.condition)}%</span></div>`;}).join("")
-        ||'<div class="empty">替补席无人可用</div>'}</div></div>
-    <div class="hint" style="margin-top:10px" id="sub-hint">先选择换下的球员，再选择替补。</div>`);
+        <span style="color:var(--gold);min-width:26px;text-align:right">${m.rating.toFixed(1)}</span></div>`;}).join("")}</div>
+    <div class="col"><div class="hint" style="margin-bottom:5px">替补席${want?`（换下 ${POS_CN[want]}，已按适配排序）`:""}</div>
+     ${benchSorted.map(id=>{const p=P(id); const fit=want?Math.round(posFit(p,want)*100):null;
+       return `<div class="clickable" onclick="pickIn(${id})" style="display:flex;gap:8px;padding:5px;border-bottom:1px solid #1d242e;${SUBOUT==null?'opacity:.55':''}">
+        <span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span><span style="flex:1;white-space:nowrap">${esc(p.cn)}</span>
+        ${fit!=null?`<span class="hint">适配 ${fit}%</span>`:""}<b style="color:${caColor(p.ca)}">${ovr(p)}</b><span class="hint" style="min-width:34px;text-align:right">${Math.round(p.condition)}%</span></div>`;}).join("")
+       ||'<div class="empty">替补席无人可用</div>'}</div>
+   </div>
+   <div class="hr"></div>
+   <div class="hint" style="margin-bottom:4px">待执行换人</div>
+   <div id="subq" style="display:flex;flex-wrap:wrap;gap:4px">${SUBQ.length? SUBQ.map((q,i)=>`<span class="pill" style="border-color:var(--acc)">🔁 ${esc(P(q.in).cn)} <span class="hint">换下</span> ${esc(nm(q.out))} <a onclick="unqueueSub(${i})" style="cursor:pointer;color:#e5484d;margin-left:4px">✕</a></span>`).join("") : '<span class="hint">暂无——也可以点「智能建议」自动配对体能不足的球员</span>'}</div>`;
+  const sc=$("#modal-bd")? $("#modal-bd").scrollTop : 0;
+  openModal(`换人（剩余 ${5-M.subsMade[side]} 个名额）`, body,
+    `<button onclick="autoSubSuggest()">🤖 智能建议</button><button onclick="cancelSubDialog()">取消</button>
+     <button class="pri" onclick="applySubs()" ${SUBQ.length?'':'disabled'}>确认换人（${SUBQ.length}）</button>`);
+  if($("#modal-bd")) $("#modal-bd").scrollTop=sc;
 }
-let SUBOUT=null;
-function pickOut(i){ SUBOUT=i;
-  document.querySelectorAll('[id^="so-"]').forEach(e=>e.style.background="");
-  const e=$("#so-"+i); if(e) e.style.background="#16301f";
-  $("#sub-hint").textContent="已选择换下，请点击右侧替补球员。";
-}
+function pickOut(i){ SUBOUT=(SUBOUT===i)? null : i; renderSubDialog(); }
 function pickIn(id){
   const M=CURMATCH, side=M.userSide;
-  if(SUBOUT==null){ $("#sub-hint").textContent="请先选择要换下的球员。"; return; }
+  if(SUBOUT==null){ toast("请先在左侧选择要换下的球员","warn"); return; }
+  if(subLeft()<=0){ toast("换人名额已用完","bad"); return; }
   const on=M.teams[side].men.filter(m=>!m.off);
-  if(doSub(M,side,on[SUBOUT],id)){ toast("换人完成"); SUBOUT=null; closeModal(); refreshMatchUI(); }
-  else toast("换人失败：名额已用完","bad");
+  SUBQ.push({out:on[SUBOUT], in:id}); SUBOUT=null; renderSubDialog();
+}
+function unqueueSub(i){ SUBQ.splice(i,1); renderSubDialog(); }
+function autoSubSuggest(){
+  const M=CURMATCH, side=M.userSide, T=M.teams[side], club=C(T.cid), slots=FORMATIONS[T.form];
+  const queuedOut=SUBQ.map(q=>q.out), queuedIn=SUBQ.map(q=>q.in);
+  const cands=T.men.filter(m=>!m.off&&m.pos!=="GK"&&!queuedOut.includes(m)&&(m.cond<62||m.rating<5.6)).sort((a,b)=>a.cond-b.cond);
+  let added=0;
+  for(const out of cands){
+    if(subLeft()<=0) break;
+    const want=slots[out.slot][0];
+    const bench=club.subs.filter(id=>P(id)&&!T.benchUsed.includes(id)&&P(id).injury<=0&&!queuedIn.includes(id));
+    let best=null,bs=-1;
+    bench.forEach(id=>{ const sc=playerScore(P(id),want)*(P(id).pos===want?1.1:1); if(sc>bs){bs=sc;best=id;} });
+    if(best==null) break;
+    SUBQ.push({out,in:best}); queuedIn.push(best); added++;
+  }
+  if(!added) toast("目前没有明显需要换下的球员（体能 <62% 或评分偏低）","warn");
+  SUBOUT=null; renderSubDialog();
+}
+function applySubs(){
+  const M=CURMATCH, side=M.userSide; let n=0;
+  SUBQ.forEach(q=>{ if(!q.out.off && doSub(M,side,q.out,q.in)) n++; });
+  toast(n? `完成 ${n} 次换人` : "换人失败：名额已用完", n?"":"bad");
+  closeSubDialog();
+}
+function cancelSubDialog(){ closeSubDialog(); }
+function closeSubDialog(){
+  SUBQ=[]; SUBOUT=null; closeModal(); refreshMatchUI(); drawPitch(1);
+  if(SUBRESUME && CURMATCH && !CURMATCH.done){ SUBRESUME=false; toggleplay(true); }
 }
 function tacDialog(){
   const M=CURMATCH, T=M.teams[M.userSide], t=T.tac;
@@ -4886,6 +5260,8 @@ function adoptWorld(obj){
   if(!obj || !obj.clubs || !obj.leagues) throw new Error("bad");
   if(obj.ver!==2 || !obj.cups) throw new Error("oldver");
   WORLD=obj; CURMATCH=null; VIEW="home"; LGNATION=null; AUTOSAVE_DAY=WORLD.day;
+  WORLD.clubs.forEach(c=>{ if(c.tactic && !c.tactic.fmtV2){ c.tactic.fmtV2=1;
+    if(c.id!==WORLD.userClub){ c.tactic.formation=pick(AI_FORMS); autoPickLineup(c); } } });
   migrateWorld();
 }
 // 旧存档迁移：重算工资预算（旧公式对小球会过紧），并把自由球员的旧合同周薪刷新为市场期望
@@ -4972,11 +5348,11 @@ function vHelp(v){
     <div class="card"><h3>比赛日</h3>
       <div style="line-height:1.85">2D 俯视球场实时演绎每一次传球、突破与射门。<br>
       • <b>空格</b>暂停 / 继续，可切换 0.5× ~ 8× 倍速<br>
-      • <b>换人</b>：全场 5 个名额，先点场上球员再点替补<br>
+      • <b>换人</b>：全场 5 个名额，先点场上球员再点替补，可一次配好几组再确认；打开换人面板会自动暂停，也可直接点球场下方的球员名<br>
       • <b>临场战术</b>：随时调整心态、节奏、逼抢与宽度，立刻生效<br>
       • 体能低于 60% 的球员表现会明显下滑，注意轮换</div></div>
     <div class="card"><h3>战术</h3>
-      <div style="line-height:1.85">8 套阵型可选。点击场上位置再点右侧球员即可换人上场；系统会显示每名球员在该位置的<b>适配度</b>。
+      <div style="line-height:1.85">17 套阵型可选（AI 球队也会各用不同阵型）。点击场上位置再点右侧球员即可换人上场；系统会显示每名球员在该位置的<b>适配度</b>。
       四条指令滑杆分别影响进攻投入、传球速度、防线高度与球场宽度——引擎会真实读取这些数值来决定球员跑位与选择。</div></div>
     <div class="card"><h3>球员</h3>
       <div style="line-height:1.85">每人 30 项 1–20 的属性，综合成 0–100 的<b>能力值</b>与隐藏的<b>潜力值</b>。
@@ -4990,7 +5366,8 @@ function vHelp(v){
       • 把球员<b>挂牌</b>可以吸引更多报价；设为<b>非卖品</b>能劝退大部分追求者。抢手球员报价只高出要价一点点时，可能被更大的俱乐部截胡<br>
       • AI 俱乐部也会挂牌冗员（搜索列表里带「挂牌」标签，要价打八五折）；窗口最后三天是截止日，市场最为活跃<br>
       • 卖不出去的球员可以随时<b>解约</b>：支付剩余合同薪水 70% 的遣散费，球员变为自由身、工资空间立即释放（阵容需保留 18 人）<br>
-      • 市场上不时会出现潜力逆天的<b>超级妖人</b>——留意新闻里的天才少年传闻，抢先下手</div></div>
+      • 市场上不时会出现潜力逆天的<b>超级妖人</b>——留意新闻里的天才少年传闻，抢先下手<br>
+      • 偶尔会有<b>足坛传奇的青年时代</b>出现在青训营或自由市场——认出那个名字，就抢先签下他</div></div>
     <div class="card"><h3>经营与董事会</h3>
       <div style="line-height:1.85">收入来自门票、商业赞助与联赛分成；支出主要是周薪、转会费和建设投入。
       在<b>「建设」</b>页可以用现金升级教练团队 / 医疗中心 / 球探网络 / 青训学院，或扩建球场增加门票收入——工程有工期，赛季末董事会按余额核定转会预算，所以要在补强阵容和长期建设之间取舍。
