@@ -4921,8 +4921,8 @@ function animLoop(ts){
   }
   if(M.done && !ANIM.ended){ ANIM.ended=true; ANIM.playing=false;
     cancelAnimationFrame(ANIM.raf); onMatchEnd(); drawPitch(1); refreshMatchUI(); return; }
-  drawPitch(clamp(ANIM.acc/PHASE_MS,0,1));
-  refreshMatchUI();
+  try{ drawPitch(clamp(ANIM.acc/PHASE_MS,0,1)); }catch(e){ if(!ANIM.drawErr){ ANIM.drawErr=1; console.error(e); toast("球场绘制出错："+e.message,"bad"); } }
+  try{ refreshMatchUI(); }catch(e){ console.error(e); }
   if(ANIM.playing) ANIM.raf=requestAnimationFrame(animLoop);
 }
 function skipMatch(){
@@ -5009,7 +5009,7 @@ function refreshMatchUI(){
     }
     ANIM.evShown=M.events.length; fd.scrollTop=fd.scrollHeight;
   }
-  const bs=$("#btn-sub"); if(bs && M.userSide>=0) bs.textContent=`🔁 换人 (${5-M.subsMade[M.userSide]})`;
+  const bs=$("#btn-sub"); if(bs && M.userSide>=0){ const t=`🔁 换人 (${5-M.subsMade[M.userSide]})`; if(bs.textContent!==t) bs.textContent=t; }  // 只在变化时改，iOS 上每帧改文本会吞掉同一行按钮的点击
   const pl=$("#m-players");
   if(pl){
     const mk=side=>`<div class="col"><div class="hint" style="margin-bottom:3px">${esc(C(side===0?M.h:M.a).cn)}${side===M.userSide?' <span style="opacity:.6">（点球员可直接换人）</span>':''}</div>
@@ -5017,7 +5017,7 @@ function refreshMatchUI(){
         `<span class="pill" ${side===M.userSide&&!M.done?`onclick="subDialog(${i})" title="换下 ${esc(nm(m))}"`:""} style="font-size:11px;${side===M.userSide&&!M.done?'cursor:pointer;':''}${m.cond<60?'border-color:#f0a020':''}">${POS_CN[m.pos]} ${esc(nm(m))}
          <b style="color:${m.cond>70?'#00d47e':m.cond>50?'#f0a020':'#e5484d'}">${Math.round(m.cond)}</b>
          <span style="color:var(--gold)">${m.rating.toFixed(1)}</span>${m.goals?" ⚽".repeat(m.goals):""}${m.yellow?" 🟨":""}</span>`).join("")}</div></div>`;
-    pl.className="row"; pl.innerHTML=mk(0)+mk(1);
+    const html=mk(0)+mk(1); if(pl._h!==html){ pl._h=html; pl.className="row"; pl.innerHTML=html; }
   }
 }
 
@@ -5682,6 +5682,9 @@ function watchOrientation(){
   window.addEventListener("resize",on);
 }
 
+let _errShown=0;
+window.addEventListener("error",e=>{ if(_errShown++<3){ try{ toast("脚本错误："+(e.message||e)+" @"+(e.lineno||"?"),"bad"); }catch(_){} } });
+window.addEventListener("unhandledrejection",e=>{ if(_errShown++<3){ try{ toast("脚本错误："+((e.reason&&e.reason.message)||e.reason),"bad"); }catch(_){} } });
 window.addEventListener("DOMContentLoaded",()=>{
   lockZoom();
   watchOrientation();
