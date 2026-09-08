@@ -2167,10 +2167,11 @@ function freeKick(M,side,o){
 }
 function cardCheck(M,side,D,inBox){
   const agg=D.p.a.aggression;
-  let pY=0.11+agg*0.0065;
-  if(inBox) pY+=0.10;
+  let pY=0.10+agg*0.006;
+  if(inBox) pY+=0.06;
+  if(D.yellow>=1) pY*=0.22;                 // 身背黄牌的球员会收着踢，裁判也更少掏第二张
   if(rnd()<pY){
-    if(D.yellow>=1 || rnd()<0.028){
+    if(D.yellow>=1 || rnd()<0.010){
       D.red=1; D.yellow=D.yellow; D.off=true; M.stats[side].red++; D.rating-=1.3;
       addEvent(M,"card",`🟥 ${nm(D)} 被红牌罚下！`,"card");
     } else {
@@ -2207,13 +2208,15 @@ function doSub(M,side,outMan,inPid){
 }
 function aiSubs(M){
   M.teams.forEach((T,side)=>{
-    if(side===M.userSide) return;
+    // 玩家一方：直接看结果（M.autoUser）时完全托管；现场观战时只自动补上受伤离场的球员
+    const userLive = side===M.userSide && !M.autoUser;
     if(!canSub(M,side)) return;
     if(M.t<55 && !T.men.some(m=>m.injured&&m.off&&!m.subDone)) return;
     // 受伤优先
     let out=T.men.find(m=>m.off&&m.injured&&!m.subDone);
     if(out){ out.subDone=true; }
     else {
+      if(userLive) return;
       if(rnd()>0.045) return;
       const cands=T.men.filter(m=>!m.off&&m.pos!=="GK"&&m.cond<64);
       if(!cands.length) return;
@@ -4928,7 +4931,7 @@ function animLoop(ts){
 function skipMatch(){
   const M=CURMATCH; if(!M) return;
   ANIM.playing=false; cancelAnimationFrame(ANIM.raf);
-  M.record=false;
+  M.record=false; M.autoUser=true;          // 托管：剩余时间由助教负责换人
   let g=0; while(!M.done && g++<20000) stepMatch(M);
   ANIM.ended=true; onMatchEnd(); refreshMatchUI();
 }
