@@ -1811,6 +1811,33 @@ function playerScore(p,pos){
   const sh=0.85+0.15*(p.sharp/100);
   return p.ca*fit*cond*mor*sh;
 }
+// 只修补名单：踢掉已离队/伤停的人，补上空缺，替补席补到 7 人，
+// 其余保持玩家自己的安排不动（转会、解约时用这个，别用 autoPickLineup）
+function repairLineup(club){
+  // 注意用 squad 判在队与否：transferPlayer 里 clubId 是后设置的，只查 clubId 会漏掉刚卖掉的人
+  const inSquad=new Set(club.squad);
+  const ok=id=>{ const p=P(id); return p && inSquad.has(id) && p.injury<=0 && p.susp<=0; };
+  const slots=FORMATIONS[club.tactic.formation];
+  if(!club.lineup || club.lineup.length!==slots.length){ autoPickLineup(club); return; }
+  const used=new Set();
+  club.lineup=club.lineup.map(id=> ok(id)? (used.add(id),id) : null);
+  club.subs=(club.subs||[]).filter(id=> ok(id) && !used.has(id) && (used.add(id),true));
+  const pool=club.squad.filter(id=>ok(id)&&!used.has(id));
+  // 补空缺的首发位置
+  slots.forEach((sl,i)=>{
+    if(club.lineup[i]!=null) return;
+    let best=null,bs=-1;
+    pool.forEach(id=>{ if(used.has(id))return; const sc=playerScore(P(id),sl[0]); if(sc>bs){bs=sc;best=id;} });
+    if(best!=null){ used.add(best); club.lineup[i]=best; }
+  });
+  // 替补席补到 7 人，优先保证有一个门将
+  const rest=club.squad.filter(id=>ok(id)&&!used.has(id)).sort((a,b)=>P(b).ca-P(a).ca);
+  if(!club.subs.some(id=>P(id).pos==="GK")){
+    const gk=rest.find(id=>P(id).pos==="GK");
+    if(gk && club.subs.length<BENCH_MAX){ club.subs.push(gk); used.add(gk); }
+  }
+  for(const id of rest){ if(club.subs.length>=BENCH_MAX) break; if(used.has(id)) continue; club.subs.push(id); used.add(id); }
+}
 function autoPickLineup(club){
   const slots=FORMATIONS[club.tactic.formation];
   const avail=club.squad.filter(id=>{const p=P(id); return p.injury<=0 && p.susp<=0;});
@@ -2719,7 +2746,8 @@ function transferPlayer(pid, toClubId, fee, wage, years){
   const p=P(pid), to=C(toClubId);
   const from = p.clubId>=0? C(p.clubId):null;
   if(from){ from.squad=from.squad.filter(i=>i!==pid); addMoney(from, fee, `出售 ${p.cn}`);
-            from.finance.transferBudget+=Math.round(fee*0.7); autoPickLineup(from); }
+            from.finance.transferBudget+=Math.round(fee*0.7);
+            if(from.id===WORLD.userClub) repairLineup(from); else autoPickLineup(from); }
   else WORLD.freeAgents=WORLD.freeAgents.filter(i=>i!==pid);
   addMoney(to, -fee, `引进 ${p.cn}`);
   to.finance.transferBudget=Math.max(0,to.finance.transferBudget-fee);
@@ -2727,7 +2755,7 @@ function transferPlayer(pid, toClubId, fee, wage, years){
   to.squad.push(pid); p.clubId=toClubId; p.wage=wage; p.contract=WORLD.season+years; p.joinedAbs=WORLD.season*400+WORLD.day;
   assignNumber(to, p);
   p.morale=clamp(p.morale+8,5,100); p.value=calcValue(p);
-  autoPickLineup(to);
+  if(to.id===WORLD.userClub) repairLineup(to); else autoPickLineup(to);
   WORLD.transferLog.unshift({d:WORLD.day, s:WORLD.season, pid, name:p.cn, pos:p.pos,
     from:from?from.id:-1, to:toClubId, fee});
   if(WORLD.transferLog.length>200) WORLD.transferLog.length=200;
@@ -3072,7 +3100,7 @@ function doRelease(pid){
   WORLD.offers=(WORLD.offers||[]).filter(o=>o.pid!==pid);
   WORLD.interest=interestList().filter(it=>it.pid!==pid);
   WORLD.shortlist=(WORLD.shortlist||[]).filter(s=>s.id!==pid);
-  autoPickLineup(c);
+  repairLineup(c);
   news(`${p.cn} 与俱乐部解约`,`${c.cn} 支付 ${money(fee)} 遣散费后与 ${p.cn} 提前解除合同，他现在是自由球员。释放年薪空间 ${money(freedWage)}，目前可用薪资空间 ${money(wageRoom(c))}/年。`,"warn");
   toast(`已与 ${p.cn} 解约，支付遣散费 ${money(fee)}`); closeModal(); render();
 }
@@ -3971,7 +3999,9 @@ function showPlayer(pid){
     </div></div>`;
   let ft="";
   if(own){
-    ft=`<button onclick="renewContract(${pid})">续约</button>
+    const inXI=UC().lineup.includes(pid), onBench=UC().subs.includes(pid);
+    ft=`<button ${inXI?"disabled title='他是首发，先在战术页把他换下来'":""} onclick="closeModal();benchToggle(${pid})">${inXI?"首发阵容中":onBench?"移出大名单":"进替补席"}</button>
+        <button onclick="renewContract(${pid})">续约</button>
         <button onclick="listPlayer(${pid})">${p.listed?"取消挂牌":"挂牌出售"}</button>
         <button onclick="toggleUntouchable(${pid})">${p.untouchable?"取消非卖品":"设为非卖品"}</button>
         <button onclick="releasePlayer(${pid})" style="color:var(--bad)">解约</button>
@@ -4016,7 +4046,15 @@ function vTactics(v){
     d.style.left=s[2]+"%"; d.style.bottom=s[1]+"%"; d.style.top="auto";
     d.innerHTML=`<div class="p">${POS_CN[s[0]]}</div><div class="n">${p?esc(p.cn.split("·").pop()):"—"}</div>
       <div class="fs">${p?ovr(p)+" · "+Math.round(p.condition)+"%":""}</div>`;
-    d.onclick=()=>{ SELSLOT=SELSLOT===i?null:i; render(); };
+    d.onclick=()=>{
+      if(SELSLOT!=null && SELSLOT!==i){
+        // 两个槽位互点 = 对调位置（可用球员列表里已经没有首发了，得走这条路）
+        const a=c.lineup[SELSLOT], b=c.lineup[i];
+        c.lineup[SELSLOT]=b; c.lineup[i]=a;
+        SELSLOT=null; render(); return;
+      }
+      SELSLOT=SELSLOT===i?null:i; render();
+    };
     pit.appendChild(d);
   });
   left.appendChild(pit);
@@ -4043,13 +4081,15 @@ function vTactics(v){
   right.appendChild(set);
 
   // 可选球员
-  const list=el("div","card"); list.innerHTML=`<h3>可用球员 ${SELSLOT!=null?`<span class="tag t-ok">选择填入 ${POS_CN[slots[SELSLOT][0]]}</span>`:""}</h3>`;
+  const list=el("div","card"); list.innerHTML=`<h3>可换上的球员 ${SELSLOT!=null?`<span class="tag t-ok">选择填入 ${POS_CN[slots[SELSLOT][0]]}</span>`:`<span class="hint" style="font-weight:400">点场上位置可换人，两个位置互点可对调</span>`}</h3>`;
   const scroll=el("div","scroll"); scroll.style.maxHeight="300px";
   const want=SELSLOT!=null?slots[SELSLOT][0]:null;
-  const avail=c.squad.map(i=>P(i)).sort((a,b)=> want? playerScore(b,want)-playerScore(a,want) : b.ca-a.ca);
+  // 已经排进阵型的人不再重复出现在这里，只列替补席和未入选
+  const avail=c.squad.map(i=>P(i)).filter(p=>!c.lineup.includes(p.id))
+              .sort((a,b)=> want? playerScore(b,want)-playerScore(a,want) : b.ca-a.ca);
   avail.forEach(p=>{
-    const used=c.lineup.includes(p.id), sub=c.subs.includes(p.id);
-    const d=el("div"); d.style.cssText=`display:flex;align-items:center;gap:8px;padding:4px 6px;border-bottom:1px solid #1d242e;cursor:pointer;${used?'background:#16301f':''}`;
+    const sub=c.subs.includes(p.id);
+    const d=el("div"); d.style.cssText=`display:flex;align-items:center;gap:8px;padding:4px 6px;border-bottom:1px solid #1d242e;cursor:pointer;${sub?'background:#1a2436':''}`;
     const fit=want?posFit(p,want):1;
     d.innerHTML=`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>
       <span style="flex:1">${esc(p.cn)}</span>
@@ -4057,15 +4097,20 @@ function vTactics(v){
       ${want?`<span class="hint" style="color:${fit>=0.9?'#00d47e':fit>=0.7?'#ffd24a':'#e5484d'}">适配${Math.round(fit*100)}%</span>`:''}
       <span class="hint">${Math.round(p.condition)}%</span>
       <b style="color:${caColor(p.ca)};width:24px;text-align:right">${ovr(p)}</b>
-      ${used?'<span class="tag t-ok">首发</span>':sub?'<span class="tag t-i">替补</span>':'<span class="tag t-n">未入选</span>'}`;
-    d.onclick=()=>{
+      ${sub?'<span class="tag t-i">替补</span>':'<span class="tag t-n">未入选</span>'}
+      <button data-bench="${p.id}" style="padding:2px 8px;font-size:11px;white-space:nowrap">${sub?"出替补":"进替补"}</button>`;
+    d.onclick=(ev)=>{
+      if(ev.target && ev.target.dataset && ev.target.dataset.bench){ benchToggle(p.id); return; }
       if(SELSLOT==null){ showPlayer(p.id); return; }
       if(p.injury>0||p.susp>0){ toast("该球员无法出场","bad"); return; }
-      const cur=c.lineup.indexOf(p.id);
-      if(cur>=0){ const tmp=c.lineup[SELSLOT]; c.lineup[SELSLOT]=p.id; c.lineup[cur]=tmp; }
-      else { const outId=c.lineup[SELSLOT]; c.lineup[SELSLOT]=p.id;
-             c.subs=c.subs.filter(x=>x!==p.id); if(outId!=null&&!c.subs.includes(outId)) c.subs.unshift(outId);
-             if(c.subs.length>7) c.subs.length=7; }
+      const outId=c.lineup[SELSLOT]; c.lineup[SELSLOT]=p.id;
+      c.subs=c.subs.filter(x=>x!==p.id);
+      if(outId!=null&&!c.subs.includes(outId)) c.subs.unshift(outId);
+      if(c.subs.length>BENCH_MAX){                 // 原来是静默丢人，现在说清楚是谁
+        const dropped=c.subs.splice(BENCH_MAX);
+        const nm=dropped.map(x=>P(x)?P(x).cn:"").filter(Boolean).join("、");
+        if(nm) toast(`替补席已满，${nm} 被移出大名单`,"warn");
+      }
       SELSLOT=null; render();
     };
     scroll.appendChild(d);
@@ -4074,11 +4119,13 @@ function vTactics(v){
   right.appendChild(list);
 
   // 替补席
-  const bench=el("div","card"); bench.innerHTML="<h3>替补席（7 人）</h3>";
+  const bench=el("div","card"); bench.innerHTML=`<h3>替补席 <span class="hint" style="font-weight:400">${c.subs.length}/${BENCH_MAX} · 点 × 移出大名单</span></h3>`;
   const bl=el("div"); bl.style.cssText="display:flex;flex-wrap:wrap;gap:6px";
   c.subs.forEach(id=>{ const p=P(id); if(!p)return;
-    const b=el("span","pill",`${POS_CN[p.pos]} ${esc(p.cn.split("·").pop())} <b style="color:${caColor(p.ca)}">${ovr(p)}</b>`);
-    b.style.cursor="pointer"; b.onclick=()=>showPlayer(id); bl.appendChild(b); });
+    const b=el("span","pill",`${POS_CN[p.pos]} ${esc(p.cn.split("·").pop())} <b style="color:${caColor(p.ca)}">${ovr(p)}</b> <span data-x="${id}" style="margin-left:4px;color:var(--dim2);padding:0 2px">×</span>`);
+    b.style.cursor="pointer";
+    b.onclick=(ev)=>{ if(ev.target&&ev.target.dataset&&ev.target.dataset.x){ benchRemove(id); return; } showPlayer(id); };
+    bl.appendChild(b); });
   if(!c.subs.length) bl.innerHTML='<span class="hint">尚未设置替补</span>';
   bench.appendChild(bl);
   right.appendChild(bench);
@@ -4088,6 +4135,28 @@ function vTactics(v){
   const fsel=$("#fmtsel"); if(fsel) fsel.onchange=e=>{ c.tactic.formation=e.target.value; autoPickLineup(c); SELSLOT=null; render(); };
   const off=$("#offs"); if(off) off.onchange=e=>c.tactic.offside=e.target.checked;
   const cnt=$("#cntr"); if(cnt) cnt.onchange=e=>c.tactic.counter=e.target.checked;
+}
+
+/* ================= 大名单 ================= */
+// 替补席的增删。之前全游戏只能通过「点场上位置换人」间接改名单，
+// 替补和未入选之间没有任何操作入口。
+const BENCH_MAX = 7;
+function benchAdd(pid){
+  const c=UC(), p=P(pid); if(!p || p.clubId!==c.id) return;
+  if(c.lineup.includes(pid)){ toast("他已经是首发，先从阵型里换下来","bad"); return; }
+  if(c.subs.includes(pid)) return;
+  if(c.subs.length>=BENCH_MAX){ toast(`替补席已满 ${BENCH_MAX} 人，先移出一个`,"bad"); return; }
+  if(p.injury>0||p.susp>0){ toast("该球员无法出场","bad"); return; }
+  c.subs.push(pid); toast(`${p.cn} 进入替补席`); render();
+}
+function benchRemove(pid){
+  const c=UC(), p=P(pid); if(!p) return;
+  if(!c.subs.includes(pid)) return;
+  c.subs=c.subs.filter(x=>x!==pid); toast(`${p.cn} 移出大名单`); render();
+}
+function benchToggle(pid){
+  const c=UC();
+  if(c.subs.includes(pid)) benchRemove(pid); else benchAdd(pid);
 }
 
 /* ================= 训练 ================= */
