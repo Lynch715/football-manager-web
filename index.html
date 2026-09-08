@@ -848,6 +848,13 @@ function regionWheelFor(rg, code){
 const POSITIONS = ["GK","DC","DL","DR","DM","MC","ML","MR","AM","ST"];
 const POS_CN = {GK:"门将",DC:"中后卫",DL:"左后卫",DR:"右后卫",DM:"后腰",MC:"中场",ML:"左前卫",MR:"右前卫",AM:"前腰",ST:"前锋"};
 const POS_GRP = {GK:"gk",DC:"df",DL:"df",DR:"df",DM:"mf",MC:"mf",ML:"mf",MR:"mf",AM:"mf",ST:"fw"};
+// 进攻行为的位置倾向：射门频率 / 运动战禁区落点权重 / 角球包抄权重
+// （不加这三张表的话，中卫会因为头球最好而包办传中与角球，进球占比高得离谱）
+const POS_SHOOT_F = {GK:0.02,DC:0.20,DL:0.48,DR:0.48,DM:0.85,MC:1.28,ML:1.32,MR:1.32,AM:1.38,ST:0.92};
+// 球推进到前场时的额外压上幅度（原来全队只整体前移 prog*0.42，中场永远进不了禁区）
+const POS_SURGE   = {GK:0,   DC:0.05,DL:0.34,DR:0.34,DM:0.42,MC:0.95,ML:1.00,MR:1.00,AM:0.90,ST:0.15};
+const POS_BOX_W   = {GK:0,   DC:0.10,DL:0.16,DR:0.16,DM:0.25,MC:0.65,ML:0.80,MR:0.80,AM:1.00,ST:1.30};
+const POS_CORNER_W= {GK:0,   DC:1.35,DL:0.30,DR:0.30,DM:0.85,MC:0.75,ML:0.40,MR:0.40,AM:0.70,ST:1.25};
 // 兼容位置（可胜任但有折扣）
 const POS_NEAR = {
   GK:[], DC:["DL","DR","DM"], DL:["DC","ML","DR"], DR:["DC","MR","DL"],
@@ -1075,6 +1082,14 @@ function rnd(){ // mulberry32
 }
 const ri = (a,b)=> a + Math.floor(rnd()*(b-a+1));
 const pick = arr => arr[Math.floor(rnd()*arr.length)];
+// 按权重随机取一个元素（权重全为 0 时退化为均匀随机）
+function pickW(arr, wts){
+  let t=0; for(let i=0;i<wts.length;i++) t+=Math.max(0,wts[i]);
+  if(t<=0) return pick(arr);
+  let r=rnd()*t;
+  for(let i=0;i<arr.length;i++){ r-=Math.max(0,wts[i]); if(r<0) return arr[i]; }
+  return arr[arr.length-1];
+}
 function gauss(mu,sd){ let u=0,v=0; while(!u)u=rnd(); while(!v)v=rnd();
   return mu + sd*Math.sqrt(-2*Math.log(u))*Math.cos(6.283185307*v); }
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -1106,6 +1121,13 @@ function genAttrs(lvl,pos){
   return A;
 }
 
+// 成长天花板：球员从出道能力 ca0 出发，16 到 26 岁之间逐步释放 pa-ca0 这段空间。
+// 没有这条，17 岁的青训产物一个赛季能涨 30 点，20 岁就顶满潜力。
+function devCap(p){
+  const base = (p.ca0!=null? p.ca0 : p.ca);
+  const f = clamp(((p.age!=null?p.age:24)-15.5)/10.5, 0.05, 1);
+  return base + (p.pa-base)*f + p.pa*0.03;      // 末尾 3% 是余量，免得曲线太规整
+}
 function calcCA(A,pos){
   const w=POS_WEIGHTS[pos]; let s=0,t=0;
   for(const k in w){ s += (A[k]||1)*w[k]; t += w[k]; }
@@ -1165,6 +1187,7 @@ function makePlayer(lvl, pos, age, clubId){
     homegrown: false, form:[]
   };
   p.ca=calcCA(A,pos);
+  p.ca0=p.ca;                    // 出道能力，成长曲线的基准（见 devCap）
   // 潜力
   const room = age<=17? ri(30,72) : age<=19? ri(20,58) : age<=21? ri(12,44)
              : age<=23? ri(6,32) : age<=26? ri(0,18) : age<=29? ri(0,7) : 0;
@@ -1176,6 +1199,42 @@ function makePlayer(lvl, pos, age, clubId){
   p.contract = WORLD.season + (age<20? ri(2,4) : age>32? ri(0,2) : ri(1,4));
   return p;
 }
+
+// ---------- 球衣号码 ----------
+// 各位置的惯用号码，按顺序试；都被占了就取 1~99 里最小的空号。
+const NUM_PREF = {
+  GK:[1,12,13,25,31], DC:[4,5,6,3,2,15,24,32], DL:[3,18,33,26], DR:[2,12,22,27],
+  DM:[6,4,16,28,29], MC:[8,14,16,20,21,23], ML:[11,17,19,30], MR:[7,17,26,34],
+  AM:[10,21,23,35], ST:[9,19,20,29,39,45]
+};
+function takenNumbers(c){
+  const set=new Set();
+  c.squad.forEach(id=>{ const q=P(id); if(q && q.num) set.add(q.num); });
+  return set;
+}
+function assignNumber(c, p, taken){
+  taken = taken || takenNumbers(c);
+  for(const k of (NUM_PREF[p.pos]||[])) if(!taken.has(k)){ p.num=k; taken.add(k); return k; }
+  // 兜底先从 12 号往上找：1~11 是有讲究的号码，别让边前卫捡到 9 号
+  for(let k=12;k<=99;k++) if(!taken.has(k)){ p.num=k; taken.add(k); return k; }
+  for(let k=2;k<=11;k++) if(!taken.has(k)){ p.num=k; taken.add(k); return k; }
+  p.num=null; return null;
+}
+// 给整支球队补号：只动没号的和撞号的，已有号码保持不变
+function ensureNumbers(c){
+  if(!c || !c.squad) return;
+  const taken=new Set(), dup=[];
+  c.squad.forEach(id=>{
+    const q=P(id); if(!q) return;
+    if(q.num && !taken.has(q.num)) taken.add(q.num);
+    else { q.num=null; dup.push(q); }
+  });
+  // 先排门将，再按位置模板顺序，让 1/9/10 这类号码落到对的人身上
+  const order=["GK","DC","DL","DR","DM","MC","ML","MR","AM","ST"];
+  dup.sort((a,b)=> (order.indexOf(a.pos)-order.indexOf(b.pos)) || (b.ca-a.ca));
+  dup.forEach(q=>assignNumber(c,q,taken));
+}
+function ensureAllNumbers(){ (WORLD.clubs||[]).forEach(ensureNumbers); }
 
 // ---------- 阵容生成 ----------
 const SQUAD_TEMPLATE = [ // 位置 : 人数
@@ -1208,7 +1267,7 @@ function makeRealPlayer(row, clubId){
   const p={
     id:nextPid(), first:parts.length>1?parts[0]:"", last:parts[parts.length-1], name, cn:cnName,
     pos, pos2:[...pos2], age, clubId, nat:natCN, rg:(club&&NATIONS[club.nation])?NATIONS[club.nation].rg:"eng",
-    a:A, ca:calcCA(A,pos), pa:Math.max(overall,potential)*2,
+    a:A, ca:calcCA(A,pos), ca0:calcCA(A,pos), pa:Math.max(overall,potential)*2,
     condition:100, morale:ri(60,88), injury:0, injType:"", sharp:ri(70,95),
     contract:WORLD.season+2, wage:0, value:0,
     apps:0, goals:0, assists:0, cleanSheet:0, ratingSum:0, motm:0, yellow:0, red:0, susp:0,
@@ -1330,8 +1389,9 @@ function newWorld(seed, userClubEn){
     WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
   }
   // 初代超级妖人
-  spawnWonderkids(ri(3,5));
+  spawnWonderkids(ri(2,3));
   if(rnd()<0.6) spawnLegendFA(true);
+  ensureAllNumbers();
   WORLD.userClub = Math.max(0, WORLD.clubs.findIndex(c=>c.en===userClubEn));
   buildSeason();
   setBoardExpectation();
@@ -1846,7 +1906,8 @@ function updatePositions(M){
     T.men.forEach(m=>{
       if(m.off) return;
       const prog=(bx-PW/2)*dir;              // 球在本方进攻方向的推进度
-      let shift = prog*(att?0.42:0.46) + ment*PW*(att?1:0.5);
+      const surge = (att && prog>12)? (prog-12)*(POS_SURGE[m.pos]||0) : 0;
+      let shift = prog*(att?0.42:0.46) + ment*PW*(att?1:0.5) + surge;
       // 门将跟随较少
       if(m.pos==="GK") shift = prog*0.10;
       let tx = m.bx + shift*dir;
@@ -1916,12 +1977,17 @@ function stepMatch(M){
   // --- 决策权重 ---
   const A=o.p.a;
   let wShoot=0, wCross=0, wDrib=0, wPass=1.0;
-  if(ax>52 && distGoal<36){
+  const posSF = POS_SHOOT_F[o.pos]!=null? POS_SHOOT_F[o.pos] : 1;
+  if(ax>48 && distGoal<40){
     const angle = 1 - clamp(dy/34,0,1)*0.72;
-    wShoot = 0.322*angle*(0.40+A.finishing/22)*Math.exp(-(distGoal-7)/12)/(1+pr*0.75);
+    wShoot = 0.46*angle*(0.40+A.finishing/22)*Math.exp(-(distGoal-7)/12)/(1+pr*0.75)*posSF;
     if(distGoal>19) wShoot *= clamp(A.longshot/15,0.30,1.5);
   }
-  if(ax>50 && dy>13) wCross = 12*(A.crossing/16)*(ax-50)/55/(1+pr*0.5)*clamp((dy-11)/12,0,1.25);
+  // 传中只是边路球员的一个选项，不该压倒其它决策（原系数 12 → 4.2，非边路再打 0.5 折）
+  if(ax>50 && dy>13){
+    const wideF = (o.pos==="ML"||o.pos==="MR"||o.pos==="DL"||o.pos==="DR")? 1 : 0.5;
+    wCross = 4.2*wideF*(A.crossing/16)*(ax-50)/55/(1+pr*0.5)*clamp((dy-11)/12,0,1.25);
+  }
   wDrib = 0.55*(A.dribbling/17)*(0.6+A.flair/34)/(1+pr*1.25)*(0.6+A.accel/30);
   wPass = 1.35*(0.5+A.passing/22)*(0.7+A.vision/30);
   if(pr>2.2) { wPass*=1.25; wDrib*=0.5; }
@@ -2050,18 +2116,18 @@ function doDribble(M,side,o,pr,dir){
 }
 function doCross(M,side,o){
   const T=M.teams[side], dir=side===0?1:-1;
-  const targets=T.men.filter(m=>!m.off&&m!==o&&(POS_GRP[m.pos]==="fw"||m.pos==="AM"||m.pos==="MC"||m.pos==="DC"));
+  const targets=T.men.filter(m=>!m.off&&m!==o&&(POS_BOX_W[m.pos]||0)>0);
   if(!targets.length){ doPass(M,side,o,0,dir); return; }
-  const ranked=targets.slice().sort((x,y)=>(att(y,'heading')*0.6+att(y,'jumping')*0.4)-(att(x,'heading')*0.6+att(x,'jumping')*0.4));
-  let tgt=ranked[Math.floor(Math.pow(rnd(),1.5)*Math.min(4,ranked.length))]||ranked[0];
-  const acc = clamp(0.20+att(o,'crossing')*0.024 + att(o,'technique')*0.006,0.15,0.62);
+  // 运动战传中找的是会进禁区的人（锋线/前腰/边路），中卫只有极小概率前插
+  const tgt=pickW(targets, targets.map(m=>POS_BOX_W[m.pos]*(0.45+(att(m,'heading')*0.6+att(m,'jumping')*0.4)/26)));
+  const acc = clamp(0.10+att(o,'crossing')*0.017 + att(o,'technique')*0.004,0.08,0.42);
   M.stats[side].pass++; o.passes++;
   if(rnd()<acc){
     o.passOk++; M.stats[side].passOk++;
     const gk=M.teams[1-side].gk;
     const def=nearestOpp(M,side,side===0?PW-11:11,PH/2);
     const av=att(tgt,'heading')*0.55+att(tgt,'jumping')*0.3+att(tgt,'strength')*0.15+gauss(0,3);
-    const dv=def.m?(att(def.m,'heading')*0.5+att(def.m,'jumping')*0.3+att(def.m,'marking')*0.2)+gauss(0,3):6;
+    const dv=(def.m?(att(def.m,'heading')*0.5+att(def.m,'jumping')*0.3+att(def.m,'marking')*0.2):6)+2.6+gauss(0,3);
     tgt.x = side===0? PW-10-rnd()*6 : 10+rnd()*6; tgt.y=PH/2+gauss(0,7);
     M.ball={x:tgt.x,y:tgt.y};
     if(av>dv){ M.ballOwner=tgt; M.lastTouch=o; doShot(M,side,tgt,Math.hypot((side===0?PW:0)-tgt.x,PH/2-tgt.y),Math.abs(tgt.y-PH/2),0.6,true); }
@@ -2074,13 +2140,14 @@ function corner(M,side){
   M.stats[side].corners++;
   const T=M.teams[side], dir=side===0?1:-1;
   const taker=T.men.reduce((b,m)=> att(m,'setpiece')>att(b,'setpiece')?m:b);
-  const tgt=T.men.filter(m=>!m.off).reduce((b,m)=> (att(m,'heading')*0.6+att(m,'jumping')*0.4)>(att(b,'heading')*0.6+att(b,'jumping')*0.4)?m:b);
+  const cands=T.men.filter(m=>!m.off&&m!==taker&&POS_CORNER_W[m.pos]>0);
+  const tgt=cands.length? pickW(cands, cands.map(m=>POS_CORNER_W[m.pos]*(0.35+(att(m,'heading')*0.6+att(m,'jumping')*0.4)/24))) : taker;
   const gk=M.teams[1-side].gk;
   M.ball={x:side===0?PW-9-rnd()*4:9+rnd()*4,y:PH/2+gauss(0,6)};
   const q=att(taker,'setpiece')*0.6+att(taker,'crossing')*0.4;
-  if(rnd()< 0.30+q*0.014){
+  if(rnd()< 0.19+q*0.012){
     const av=att(tgt,'heading')*0.6+att(tgt,'jumping')*0.4+gauss(0,3.4);
-    const dv=att(gk,'aerial')*0.4+ 11 + gauss(0,3.4);
+    const dv=att(gk,'aerial')*0.4+ 12 + gauss(0,3.4);
     tgt.x=M.ball.x; tgt.y=M.ball.y; M.ballOwner=tgt; M.lastTouch=taker;
     if(av>dv){ doShot(M,side,tgt,Math.hypot((side===0?PW:0)-tgt.x,PH/2-tgt.y),Math.abs(tgt.y-PH/2),0.7,true); return; }
   }
@@ -2091,7 +2158,7 @@ function doShot(M,side,o,dist,dy,pr,isHeader){
   o.shots++; M.stats[side].shots++;
   const angle=1-clamp(dy/30,0,1)*0.6;
   // 预期进球
-  let xg = clamp(0.92*Math.exp(-dist/8.2)*angle*(isHeader?0.62:1)/(1+pr*0.42),0.008,0.86);
+  let xg = clamp(0.92*Math.exp(-dist/9.0)*angle*(isHeader?0.62:1)/(1+pr*0.42),0.008,0.86);
   M.stats[side].xg+=xg;
   const fin=isHeader? att(o,'heading')*0.65+att(o,'jumping')*0.35 : att(o,'finishing')*0.7+att(o,'technique')*0.3;
   const comp=att(o,'composure');
@@ -2470,6 +2537,7 @@ function weeklyTick(){
   WORLD.clubs.forEach(c=>trainClub(c));
   // 董事会 & 转会关注度
   updateInterest();
+  poachProspects();
   aiListSurplus();
   boardReview();
 }
@@ -2484,7 +2552,8 @@ function trainClub(c){
     const coachF = 0.55 + c.coachRating*0.055;
     const playF = 0.75 + clamp(p.apps/Math.max(1,c.seasonStats.p||1),0,1.25)*0.45;
     const gap = Math.max(0,p.pa-p.ca);
-    let gain = gap*0.0055*ageF*coachF*playF*inten*(0.55+p.a.workrate/22)*(0.7+rnd()*0.7);
+    let gain = gap*0.0052*ageF*coachF*playF*inten*(0.55+p.a.workrate/22)*(0.7+rnd()*0.7);
+    if(p.ca>=devCap(p)) gain *= 0.15;                  // 已经吃满这个年龄该有的水平
     // 老化衰退
     if(p.age>=30) gain -= (p.age-29)*0.055*(1.15-p.a.stamina*0.012);
     if(p.injury>0) gain*=0.25;
@@ -2514,7 +2583,7 @@ function bumpAttr(p,focusList,dir,club){
   const k=pick(pool);
   p.a[k]=clamp(p.a[k]+dir,1,20);
   const nc=calcCA(p.a,p.pos);
-  if(dir>0 && nc>p.pa) { p.a[k]-=dir; return; }
+  if(dir>0 && (nc>p.pa || nc>devCap(p))) { p.a[k]-=dir; return; }
   p.ca=nc;
   if(dir>0 && club && club.id===WORLD.userClub && rnd()<0.06)
     news(`${p.cn} 状态提升`,`训练报告：${p.cn} 的「${ALL_ATTRS[k]}」提升到 ${p.a[k]}。`,"good");
@@ -2622,6 +2691,7 @@ function askingPrice(p){
   if(p.morale<40) mult*=0.86;
   if(p.injury>20) mult*=0.80;
   mult *= 1 + perfIndex(p)*0.35;                       // 表现突出 → 溢价
+  if(p.age<=21 && p.pa>=150) mult *= 1.35 + (p.pa-150)/100;   // 少年天才：俱乐部知道手里是什么
   if(p.listed && p.clubId!==WORLD.userClub) mult*=0.85; // AI 挂牌 → 折价
   return Math.max(5000, Math.round(base*mult/1000)*1000);
 }
@@ -2653,7 +2723,9 @@ function transferPlayer(pid, toClubId, fee, wage, years){
   else WORLD.freeAgents=WORLD.freeAgents.filter(i=>i!==pid);
   addMoney(to, -fee, `引进 ${p.cn}`);
   to.finance.transferBudget=Math.max(0,to.finance.transferBudget-fee);
+  p.num=null;                                  // 换东家就换号
   to.squad.push(pid); p.clubId=toClubId; p.wage=wage; p.contract=WORLD.season+years; p.joinedAbs=WORLD.season*400+WORLD.day;
+  assignNumber(to, p);
   p.morale=clamp(p.morale+8,5,100); p.value=calcValue(p);
   autoPickLineup(to);
   WORLD.transferLog.unshift({d:WORLD.day, s:WORLD.season, pid, name:p.cn, pos:p.pos,
@@ -2797,13 +2869,16 @@ function aiTransferRound(tries){
     const budget=clubSpend(buyer);
     if(budget<50000) continue;
     const need=squadNeed(buyer);
-    const chase = rnd()<0.3;   // 30% 追逐表现突出的球员，70% 补短板
+    const r0=rnd();
+    const chasePot = r0<0.22 && buyer.rep>=34;   // 22% 抢高潜力少年（只有像样的俱乐部干这事）
+    const chase = !chasePot && r0<0.46;          // 24% 追逐表现突出的球员，其余补短板
     const pool=Object.values(WORLD.players).filter(p=>
         p.clubId!==buyer.id && p.clubId!==u.id && p.injury<=25 && p.age<34 &&
         absDay()-(p.joinedAbs!=null?p.joinedAbs:-999)>150 &&
-        (chase ? (perfIndex(p)>=0.45 && p.ca>buyer.rep*1.6)
+        (chasePot ? (p.age<=21 && p.pa>=150 && p.pa-p.ca>=25)
+         : chase ? (perfIndex(p)>=0.45 && p.ca>buyer.rep*1.6)
                : ((p.pos===need.pos||(p.pos2||[]).includes(need.pos)) && p.ca>need.cur+5)) &&
-        p.ca < buyer.rep*2.05+42);
+        (chasePot || p.ca < buyer.rep*2.05+42));
     const afford=pool.filter(p=>{
         const seller=p.clubId>=0?C(p.clubId):null;
         if(seller && !canSell(seller,p)) return false;
@@ -2811,7 +2886,8 @@ function aiTransferRound(tries){
         if(seller && !p.listed && buyer.rep < seller.rep-3 && rnd()<0.5) return false;
         return askingPrice(p)<=budget; });
     if(!afford.length) continue;
-    afford.sort((a,b)=>(b.ca+perfIndex(b)*18)-(a.ca+perfIndex(a)*18));
+    if(chasePot) afford.sort((a,b)=>(b.pa*1.0+b.ca*0.25)-(a.pa*1.0+a.ca*0.25));
+    else afford.sort((a,b)=>(b.ca+perfIndex(b)*18)-(a.ca+perfIndex(a)*18));
     const tgt=afford[Math.floor(Math.pow(rnd(),1.8)*Math.min(afford.length,12))];
     if(!tgt) continue;
     const seller=tgt.clubId>=0?C(tgt.clubId):null;
@@ -2828,13 +2904,54 @@ function aiTransferRound(tries){
   for(let k=0;k<ri(0,2);k++){
     const buyer=WORLD.clubs[Math.floor(rnd()*60)];
     if(buyer.id===u.id||buyer.squad.length>=28) continue;
-    const fa=WORLD.freeAgents.filter(i=>P(i)&&P(i).ca>buyer.rep*1.2);
+    const fa=WORLD.freeAgents.filter(i=>{ const q=P(i); if(!q) return false;
+      return q.ca>buyer.rep*1.2 || (q.age<=20 && q.pa>=150); });   // 潜力股也要抢
     if(!fa.length) continue;
     const id=pick(fa), fw=wageDemand(P(id),buyer);
     if(!aiAffordWage(buyer, fw*52, 0)) continue;
     transferPlayer(id, buyer.id, 0, fw, ri(1,3));
   }
 }
+// 传奇之种 / 妖人如果玩家不出手，就会被别的俱乐部签走——错过就是真错过
+function poachProspects(){
+  if(!inTransferWindow()) return;
+  const u=UC();
+  const isProspect=p=>p && p.age<=21 && (p.legend||p.wonderkid||p.pa>=160);
+  const known=pid=>(WORLD.shortlist||[]).some(s=>s.id===pid);
+  // (a) 自由市场里的少年天才
+  (WORLD.freeAgents||[]).slice().forEach(id=>{
+    const p=P(id); if(!isProspect(p)) return;
+    if(rnd()>0.26) return;
+    const cands=WORLD.clubs.filter(c=>c.id!==u.id && c.squad.length<30 && c.rep>=30);
+    if(!cands.length) return;
+    const b=pickW(cands, cands.map(c=>Math.pow(c.rep,2.2)));
+    if(!b) return;
+    const w=wageDemand(p,b);
+    if(!aiAffordWage(b, w*52, 0)) return;
+    transferPlayer(id, b.id, 0, w, ri(3,5));
+    if(p.legend||known(id))
+      news(`${p.cn} 被 ${b.short} 签下`,
+        `自由身少年 ${p.cn}（${POS_CN[p.pos]}，${p.age} 岁）已与 ${b.cn} 签约。${known(id)?"他在你的关注名单上——你没有出手。":"你的球探此前提到过他。"}`,"bad");
+  });
+  // (b) 待在小俱乐部里的少年天才，会被豪门挖走
+  WORLD.clubs.forEach(c=>{
+    if(c.id===u.id || c.rep>=62) return;
+    c.squad.map(i=>P(i)).filter(isProspect).forEach(p=>{
+      if(rnd()>0.05) return;
+      const cands=WORLD.clubs.filter(b=>b.id!==u.id && b.id!==c.id && b.rep>c.rep+12 && b.squad.length<30);
+      if(!cands.length) return;
+      const b=pickW(cands, cands.map(x=>Math.pow(x.rep,2.2)));
+      if(!b) return;
+      const fee=askingPrice(p), w=wageDemand(p,b);
+      if(fee>clubSpend(b) || !aiAffordWage(b, w*52, fee)) return;
+      transferPlayer(p.id, b.id, fee, w, ri(3,5));
+      if(p.legend||known(p.id))
+        news(`${b.short} 抢下 ${p.cn}`,
+          `${b.cn} 以 ${money(fee)} 从 ${c.cn} 签下 ${p.age} 岁的 ${POS_CN[p.pos]} ${p.cn}。${known(p.id)?"他在你的关注名单上。":""}`,"bad");
+    });
+  });
+}
+
 // AI 俱乐部每周把冗员挂牌（市场上会出现折价球员）
 function aiListSurplus(){
   WORLD.clubs.forEach(c=>{
@@ -2959,6 +3076,25 @@ function doRelease(pid){
   news(`${p.cn} 与俱乐部解约`,`${c.cn} 支付 ${money(fee)} 遣散费后与 ${p.cn} 提前解除合同，他现在是自由球员。释放年薪空间 ${money(freedWage)}，目前可用薪资空间 ${money(wageRoom(c))}/年。`,"warn");
   toast(`已与 ${p.cn} 解约，支付遣散费 ${money(fee)}`); closeModal(); render();
 }
+function askShirtNumber(pid){
+  const p=P(pid); if(!p || p.clubId!==WORLD.userClub) return;
+  const c=UC(), taken=takenNumbers(c);
+  const used=[...taken].filter(x=>x!==p.num).sort((a,b)=>a-b);
+  openModal(`更换球衣号码 · ${esc(p.cn)}`,
+    `<div class="hint">当前号码 <b>${p.num||"—"}</b>。输入 1~99 之间的号码，已被队友占用的号码不能选。</div>
+     <div style="margin-top:12px"><label>新号码</label><input id="sn-v" type="number" min="1" max="99" value="${p.num||""}" style="width:120px"></div>
+     <div class="hint" style="margin-top:10px">队内已占用：${used.length?used.join("、"):"（无）"}</div>`,
+    `<button class="pri" onclick="setShirtNumber(${pid})">确定</button><button onclick="closeModal()">取消</button>`);
+}
+function setShirtNumber(pid){
+  const p=P(pid), c=UC();
+  const v=Math.round(+($("#sn-v")||{}).value);
+  if(!(v>=1 && v<=99)){ toast("号码必须在 1~99 之间","bad"); return; }
+  if(v===p.num){ closeModal(); return; }
+  const holder=c.squad.map(i=>P(i)).find(q=>q && q.num===v);
+  if(holder){ toast(`${v} 号已经是 ${holder.cn} 的号码`,"bad"); return; }
+  p.num=v; toast(`${p.cn} 改穿 ${v} 号`); closeModal(); render();
+}
 function toggleUntouchable(pid){
   const p=P(pid); p.untouchable=!p.untouchable; if(p.untouchable) p.listed=false;
   toast(p.untouchable?`${p.cn} 已设为非卖品，大多数俱乐部会知难而退`:`已取消 ${p.cn} 的非卖品标记`);
@@ -2969,7 +3105,7 @@ function toggleUntouchable(pid){
 function makeWonderkid(clubId){
   const pos=pick(POSITIONS);
   const p=makePlayer(clamp(gauss(46,8),34,60), pos, ri(16,18), clubId);
-  p.pa=clamp(Math.max(p.pa, ri(176,200)), p.ca+50, 200);
+  p.pa=clamp(Math.max(p.pa, ri(150,178)), p.ca+40, 200);   // 显示潜力 75~89，压在传奇之下
   p.wonderkid=true;
   if(clubId>=0){
     const c=C(clubId);
@@ -2988,7 +3124,9 @@ function spawnWonderkids(n){
   for(let i=0;i<n;i++){
     const cands=WORLD.clubs.filter(x=>x.squad.length<34);
     if(!cands.length) break;
-    arr.push(makeWonderkid(pick(cands).id));
+    // 好苗子更可能出在青训体系强、声望高的队，而不是均匀撒
+    const host=pickW(cands, cands.map(x=>Math.pow(x.youthRating*1.4+x.rep*0.5,1.8)));
+    arr.push(makeWonderkid((host||pick(cands)).id));
   }
   if(arr.length){
     const txt=arr.map(p=>`${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.clubId>=0?C(p.clubId).cn:"自由身"}）`).join("、");
@@ -3201,7 +3339,8 @@ function makeLegendYouth(clubId, ageMin, ageMax){
   maps.forEach((keys,i)=>{ const f=clamp(v[i]/ovr,0.45,1.1);
     keys.forEach(k=>{ p.a[k]=clamp(Math.round(p.a[k]*(0.55+f*0.6)),1,20); }); });
   fitAttrsToOverall(p.a,pos,lvl);
-  p.ca=calcCA(p.a,pos); p.pa=Math.max(pa,p.ca+40);
+  p.ca=calcCA(p.a,pos); p.ca0=p.ca;   // 属性被重写过，成长基准要跟着走
+  p.pa=clamp(Math.max(pa+ri(2,10), p.ca+55), p.ca+55, 200);   // 传奇必须是潜力天花板
   const parts=cn.split("·");
   p.name=en; p.first=parts.length>1?parts[0]:""; p.last=parts[parts.length-1]; p.cn=cn; p.nat=natCn;
   p.legend=true; p.pos2=[]; const near=POS_NEAR[pos]||[]; if(near.length) p.pos2=[pick(near)];
@@ -3226,7 +3365,7 @@ function spawnLegendFA(quiet){
   p.wage=marketWage(p); p.contract=WORLD.season; p.value=Math.round(calcValue(p)*0.4);
   WORLD.players[p.id]=p; WORLD.freeAgents.push(p.id);
   if(!quiet) news("球探简报：无合同少年",
-    `球探在业余联赛注意到一名叫 ${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.nat}）的自由身少年，尚无职业合同，据说已有多家俱乐部在打听。`,"good");
+    `球探在业余联赛注意到一名叫 ${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.nat}）的自由身少年，尚无职业合同。已有多家俱乐部在打听——转会窗一开，他撑不了几周。`,"good");
   return p;
 }
 
@@ -3239,7 +3378,10 @@ function youthIntake(){
       const lvl=clamp(gauss(c.youthRating*2.0+c.rep*0.28, 7),6,62);
       const pos=pick(POSITIONS);
       const p=makePlayer(lvl,pos,ri(16,17),c.id);
-      p.pa=clamp(p.ca+ri(25,95)+Math.round(c.youthRating*1.6),p.ca,200);
+      // 右偏：rnd^2.3 让绝大多数苗子只加 20~40，出一个高潜力才是真事件
+      const bonus = 20 + Math.pow(rnd(),2.3)*85 + c.youthRating*1.2;
+      const capPA = 108 + c.youthRating*3.4;   // 20 级青训营天花板 176(≈88)，8 级只有 135(≈67)
+      p.pa=clamp(Math.round(p.ca+bonus), p.ca, Math.min(200, Math.round(capPA)));
       p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep)*0.35/50)*50);
       p.contract=WORLD.season+3;
       WORLD.players[p.id]=p; c.squad.push(p.id); arr.push(p);
@@ -3250,7 +3392,8 @@ function youthIntake(){
     }
   });
   spawnLegendYouths();
-  spawnWonderkids(ri(2,4));
+  spawnWonderkids(ri(1,2));
+  ensureAllNumbers();                        // 新苗子（含妖人/传奇）发号
   // 青训与妖人是被动入队，不该把俱乐部顶破工资预算——差额由董事会追加
   WORLD.clubs.forEach(c=>{
     const over=wageBill(c)-c.finance.wageBudget;
@@ -3395,6 +3538,7 @@ function endSeason(){
   // 自由球员市场容量上限，避免逐年膨胀（在各队清理冗员之后执行，只留最好的一批）
   WORLD.freeAgents.sort((a,b)=>(P(b).ca+(P(b).pa-P(b).ca)*0.5)-(P(a).ca+(P(a).pa-P(a).ca)*0.5));
   WORLD.freeAgents.splice(220).forEach(id=>{ delete WORLD.players[id]; });
+  ensureAllNumbers();
   // 清理关注名单里已不存在的球员（退役 / 自由市场清理）
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
@@ -3743,6 +3887,7 @@ function vSquad(v){
   const card=el("div","card");
   card.appendChild(makeTable([
     {h:"",k:"st",nos:true,cls:"ctr",r:p=>inXI(p.id)?'<span class="tag t-ok">首发</span>':inSub(p.id)?'<span class="tag t-i">替补</span>':''},
+    {h:"#",k:"num",cls:"num",mh:true,v:p=>p.num||999,r:p=>`<span class="hint" style="font-variant-numeric:tabular-nums">${p.num||"-"}</span>`},
     {h:"姓名",k:"n",v:p=>p.cn,r:p=>`<b>${esc(p.cn)}</b>${p.homegrown?' <span class="hint">◆</span>':''}<div class="hint en-sub" style="font-size:10.5px">${esc(p.name)}</div>`},
     {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${p.pos2.length?`<span class="hint pos2" style="font-size:10.5px"> ${p.pos2.map(x=>POS_CN[x]).join("/")}</span>`:""}`},
     {h:"年龄",k:"age",cls:"num",mh:true,v:p=>p.age,r:p=>p.age},
@@ -3794,6 +3939,7 @@ function showPlayer(pid){
       <table style="font-size:12px;width:100%">
         <tr><td class="hint">俱乐部</td><td>${club?esc(club.cn):"自由球员"}</td></tr>
         <tr><td class="hint">位置</td><td><span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span> ${p.pos2.map(x=>`<span class="tag t-n">${POS_CN[x]}</span>`).join("")}</td></tr>
+        ${p.clubId>=0?`<tr><td class="hint">球衣号码</td><td><b>${p.num||"—"}</b>${own?` <button style="margin-left:6px;padding:2px 8px;font-size:11px" onclick="askShirtNumber(${p.id})">更换</button>`:""}</td></tr>`:""}
         <tr><td class="hint">国籍</td><td>${esc(p.nat||"—")}</td></tr>
         <tr><td class="hint">年龄</td><td>${p.age} 岁</td></tr>
         <tr><td class="hint">当前能力</td><td><b style="color:${caColor(p.ca)}">${ovr(p)}</b></td></tr>
@@ -5299,6 +5445,9 @@ function adoptWorld(obj){
   if(!obj || !obj.clubs || !obj.leagues) throw new Error("bad");
   if(obj.ver!==2 || !obj.cups) throw new Error("oldver");
   WORLD=obj; CURMATCH=null; VIEW="home"; LGNATION=null; AUTOSAVE_DAY=WORLD.day;
+  // 老存档没有 ca0（成长曲线基准），按当前能力回填
+  Object.values(WORLD.players||{}).forEach(p=>{ if(p && p.ca0==null) p.ca0=p.ca; });
+  ensureAllNumbers();                        // 老存档没有球衣号码
   WORLD.clubs.forEach(c=>{ if(c.tactic && !c.tactic.fmtV2){ c.tactic.fmtV2=1;
     if(c.id!==WORLD.userClub){ c.tactic.formation=pick(AI_FORMS); autoPickLineup(c); } } });
   migrateWorld();
