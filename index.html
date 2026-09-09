@@ -5474,14 +5474,27 @@ function tacDialog(){
    ========================================================= */
 const SAVEKEY="fmweb_save_v2";
 const OLD_SAVEKEY="fmweb_save_v1";
-/* ---------- IndexedDB 存档层（存档可达数 MB，localStorage 装不下）---------- */
+const METAKEY=SAVEKEY+"_meta";
+/* =========================================================
+   存档存储层：IndexedDB → Cache Storage → localStorage 三层兜底
+   任何一层活着就存得住。正文压缩后再写（体积约 1/10），
+   索引（meta）单独写、三层都写，绝不因为正文写失败就丢掉。
+   鸿蒙/华为浏览器上 IndexedDB 可能被隐私策略拦掉，这是本层存在的原因。
+   ========================================================= */
 const DB_NAME="fmweb_db", DB_STORE="saves";
+const CACHE_NS="fmweb-saves", CACHE_BASE="./__fmsave__/";
+let STORE_TIER="";        // 上次成功写入的层，状态栏与自检显示用
+let SAVE_FAILS=0;         // 连续保存失败次数
+let SAVE_ERR="";          // 最近一次失败原因
 function idbOpen(){
   return new Promise((res,rej)=>{
     if(!window.indexedDB) return rej(new Error("no-idb"));
-    const r=indexedDB.open(DB_NAME,1);
+    let r;
+    try{ r=indexedDB.open(DB_NAME,1); }catch(e){ return rej(e); }
     r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(DB_STORE)) r.result.createObjectStore(DB_STORE); };
-    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); r.onblocked=()=>rej(new Error("blocked"));
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error||new Error("idb-open"));
+    r.onblocked=()=>rej(new Error("blocked"));
+    setTimeout(()=>rej(new Error("idb-timeout")),8000);   // 有的内核会卡住不回调
   });
 }
 function idbSet(k,v){ return idbOpen().then(db=>new Promise((res,rej)=>{
@@ -5493,21 +5506,89 @@ function idbGet(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
 function idbDel(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
   const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).delete(k);
   tx.oncomplete=()=>{db.close();res(true);}; tx.onerror=()=>{db.close();rej(tx.error);}; })); }
-// 统一读写：优先 IndexedDB，失败时退回 localStorage
+/* ---------- Cache Storage 层（无 5MB 上限，鸿蒙上通常比 IndexedDB 稳）---------- */
+function cacheOK(){ return typeof caches!=="undefined" && window.isSecureContext!==false; }
+async function cacheSet(k,v){ if(!cacheOK()) throw new Error("no-cache");
+  const c=await caches.open(CACHE_NS); await c.put(CACHE_BASE+k,new Response(v)); return true; }
+async function cacheGet(k){ if(!cacheOK()) throw new Error("no-cache");
+  const c=await caches.open(CACHE_NS); const r=await c.match(CACHE_BASE+k); return r? await r.text() : null; }
+async function cacheDel(k){ if(!cacheOK()) return;
+  const c=await caches.open(CACHE_NS); await c.delete(CACHE_BASE+k); }
+/* ---------- 压缩：deflate-raw，几 MB 的存档一般压到几百 KB ---------- */
+const CAN_Z=(typeof CompressionStream!=="undefined" && typeof DecompressionStream!=="undefined");
+async function zipSave(str){
+  if(!CAN_Z) return "Z0:"+str;
+  const buf=await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer();
+  const b=new Uint8Array(buf); let out="";
+  for(let i=0;i<b.length;i+=8192) out+=String.fromCharCode.apply(null,b.subarray(i,i+8192));
+  return "Z1:"+out;
+}
+async function unzipSave(p){
+  if(p==null) return null;
+  const h=String(p).slice(0,3);
+  if(h==="Z0:") return p.slice(3);
+  if(h!=="Z1:") return p;                       // 没有封装头 = 老版本的裸 JSON，直接用
+  const s=p.slice(3), b=new Uint8Array(s.length);
+  for(let i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&255;
+  return await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+}
+/* ---------- 统一读写 ---------- */
+let META_CACHE=null;
 async function storeSave(str, meta){
-  try{ await idbSet(SAVEKEY,str); try{ localStorage.removeItem(SAVEKEY); }catch(e){} }
-  catch(e){ localStorage.setItem(SAVEKEY,str); }   // 抛错交给调用方
-  localStorage.setItem(SAVEKEY+"_meta",JSON.stringify({...meta, mb:(str.length/1048576).toFixed(2)}));
+  const payload=await zipSave(str);
+  const mj=JSON.stringify({...meta, mb:(str.length/1048576).toFixed(2),
+                           zmb:(payload.length/1048576).toFixed(2), at:Date.now()});
+  const tiers=[]; let lastErr=null;
+  try{ await idbSet(SAVEKEY,payload); tiers.push("IndexedDB"); }catch(e){ lastErr=e; }
+  try{ await cacheSet(SAVEKEY,payload); tiers.push("Cache"); }catch(e){ lastErr=lastErr||e; }
+  if(tiers.length){ try{ localStorage.removeItem(SAVEKEY); }catch(e){} }
+  else{
+    try{ localStorage.setItem(SAVEKEY,payload); tiers.push("localStorage"); }
+    catch(e){ lastErr=e; }
+  }
+  // 索引三层都写，正文写失败也要留下痕迹，否则下次开机会当成「没有存档」
+  try{ localStorage.setItem(METAKEY,mj); }catch(e){}
+  try{ await idbSet(METAKEY,mj); }catch(e){}
+  try{ await cacheSet(METAKEY,mj); }catch(e){}
+  try{ META_CACHE=JSON.parse(mj); }catch(e){}
+  if(!tiers.length) throw new Error("三层存储全部写入失败"+(lastErr&&lastErr.message?("："+lastErr.message):""));
+  STORE_TIER=tiers.join(" + ");
+  return STORE_TIER;
+}
+async function readRawSave(){
+  let p=null;
+  try{ p=await idbGet(SAVEKEY); }catch(e){}
+  if(!p){ try{ p=await cacheGet(SAVEKEY); }catch(e){} }
+  if(!p){ try{ p=localStorage.getItem(SAVEKEY); }catch(e){} }
+  return p||null;
 }
 async function readSave(){
-  let s=null;
-  try{ s=await idbGet(SAVEKEY); }catch(e){}
-  if(!s){ try{ s=localStorage.getItem(SAVEKEY); }catch(e){} }
-  return s||null;
+  const p=await readRawSave();
+  if(!p) return null;
+  try{ return await unzipSave(p); }catch(e){ return null; }
+}
+async function hasSaveBody(){ return !!(await readRawSave()); }
+async function readMeta(){
+  let raw=null;
+  try{ raw=localStorage.getItem(METAKEY); }catch(e){}
+  if(!raw){ try{ raw=await idbGet(METAKEY); }catch(e){} }
+  if(!raw){ try{ raw=await cacheGet(METAKEY); }catch(e){} }
+  if(raw){ try{ const m=JSON.parse(raw);
+    META_CACHE={club:m.club||"未知俱乐部",season:m.season,day:m.day||0,mb:m.mb||"?",auto:m.auto};
+    return META_CACHE; }catch(e){} }
+  if(await hasSaveBody()){                       // 索引丢了但正文还在，照样让他继续
+    META_CACHE={club:"未知俱乐部",day:"?",mb:"?",recovered:1};
+    return META_CACHE;
+  }
+  return null;
 }
 async function deleteSave(){
-  try{ await idbDel(SAVEKEY); }catch(e){}
-  try{ localStorage.removeItem(SAVEKEY); localStorage.removeItem(SAVEKEY+"_meta"); }catch(e){}
+  for(const k of [SAVEKEY,METAKEY]){
+    try{ await idbDel(k); }catch(e){}
+    try{ await cacheDel(k); }catch(e){}
+    try{ localStorage.removeItem(k); }catch(e){}
+  }
+  META_CACHE=null; STORE_TIER=""; SAVE_FAILS=0; SAVE_ERR="";
 }
 // 载入存档对象并校验版本
 function adoptWorld(obj){
@@ -5530,8 +5611,69 @@ function migrateWorld(){
 }
 function loadErrMsg(e){ return (e&&e.message==="oldver")? "这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏" : "存档无法读取"; }
 
+
+/* ---------- 存储自检：丢档时用它定位到底哪一层挂了 ---------- */
+async function storageSelfTest(onStep){
+  const R=[], log=(name,ok,msg)=>{ R.push({name,ok,msg:msg||""}); if(onStep) onStep(R); };
+  const MB=n=>"x".repeat(Math.round(n*1048576));
+  let mode="浏览器标签页";
+  try{ if(window.matchMedia && (matchMedia("(display-mode: standalone)").matches||matchMedia("(display-mode: fullscreen)").matches)) mode="桌面快捷方式/PWA 启动"; }catch(e){}
+  log("环境",true,`${location.protocol}//${location.host||"本地文件"}　${window.isSecureContext===false?"非安全上下文":"安全上下文"}　${mode}`);
+  log("浏览器",true,navigator.userAgent);
+
+  try{
+    localStorage.setItem("__fmprobe","1"); localStorage.removeItem("__fmprobe");
+    let best=0;
+    for(const m of [0.25,0.5,1,2,4,8]){ try{ localStorage.setItem("__fmprobe",MB(m)); best=m; }catch(e){ break; } }
+    try{ localStorage.removeItem("__fmprobe"); }catch(e){}
+    log("localStorage",true,`可写，单条最大约 ${best>=8?"≥8":best} MB`);
+  }catch(e){ log("localStorage",false,"不可写："+((e&&e.message)||e)); }
+
+  if(!window.indexedDB) log("IndexedDB",false,"内核不提供 indexedDB");
+  else{ try{ const big=MB(1); await idbSet("__fmprobe",big); const back=await idbGet("__fmprobe");
+      try{ await idbDel("__fmprobe"); }catch(e){}
+      log("IndexedDB",back===big,back===big?"写入 1MB 并读回一致":"写入后读回不一致或为空");
+    }catch(e){ log("IndexedDB",false,"失败："+((e&&e.message)||e)); } }
+
+  if(typeof caches==="undefined") log("Cache Storage",false,"内核不提供 caches");
+  else if(window.isSecureContext===false) log("Cache Storage",false,"非安全上下文，不可用");
+  else{ try{ const big=MB(1); await cacheSet("__fmprobe",big); const back=await cacheGet("__fmprobe");
+      try{ await cacheDel("__fmprobe"); }catch(e){}
+      log("Cache Storage",back===big,back===big?"写入 1MB 并读回一致":"写入后读回不一致或为空");
+    }catch(e){ log("Cache Storage",false,"失败："+((e&&e.message)||e)); } }
+
+  log("压缩 deflate-raw",CAN_Z,CAN_Z?"可用，存档压缩后再落盘":"不可用，存档按原文落盘（体积约大 10 倍）");
+
+  try{
+    if(navigator.storage&&navigator.storage.estimate){
+      const es=await navigator.storage.estimate();
+      let ps=null; try{ if(navigator.storage.persisted) ps=await navigator.storage.persisted(); }catch(e){}
+      log("配额",true,`已用 ${(es.usage/1048576).toFixed(1)} MB，上限 ${(es.quota/1048576).toFixed(0)} MB`
+        +(ps===null?"":`　持久化：${ps?"已授予（系统不会随手清）":"未授予（系统紧张时可能清掉）"}`));
+    } else log("配额",true,"内核不提供 storage.estimate");
+  }catch(e){ log("配额",false,String((e&&e.message)||e)); }
+
+  const where=[],mw=[];
+  try{ if(await idbGet(SAVEKEY)) where.push("IndexedDB"); }catch(e){}
+  try{ if(await cacheGet(SAVEKEY)) where.push("Cache"); }catch(e){}
+  try{ if(localStorage.getItem(SAVEKEY)) where.push("localStorage"); }catch(e){}
+  try{ if(localStorage.getItem(METAKEY)) mw.push("localStorage"); }catch(e){}
+  try{ if(await idbGet(METAKEY)) mw.push("IndexedDB"); }catch(e){}
+  try{ if(await cacheGet(METAKEY)) mw.push("Cache"); }catch(e){}
+  log("存档正文",where.length>0,where.length?"存在于 "+where.join("、"):"三层都没有");
+  log("存档索引",mw.length>0,mw.length?"存在于 "+mw.join("、"):"三层都没有");
+  return R;
+}
+
 function vSave(v){
-  v.appendChild(el("div","",`<h1>存档</h1><div class="sub">进度会在每次操作后自动保存到本浏览器；也可以导出为文件长期保留或换设备继续</div>`));
+  v.appendChild(el("div","",`<h1>存档</h1><div class="sub">进度会在每次操作后自动保存到本浏览器（IndexedDB / Cache / localStorage 三层兜底）；也可以导出为文件长期保留或换设备继续</div>`));
+  if(SAVE_FAILS>0){
+    const w=el("div","card");
+    w.style.cssText="border-color:var(--bad);margin-bottom:12px";
+    w.innerHTML=`<h3 style="color:var(--bad)">⚠ 自动保存失败 ${SAVE_FAILS} 次</h3>
+      <div class="hint">${esc(SAVE_ERR||"浏览器存储不可用")}<br>当前进度<b>不会</b>被保留。请立刻点下面的「导出存档文件」，再到本页底部运行「存储自检」看是哪一层挂了。</div>`;
+    v.appendChild(w);
+  }
   const g=el("div","grid2");
   const a=el("div","card"); a.innerHTML=`<h3>浏览器存档 <span class="tag t-ok">自动保存已开启</span></h3><div class="hint" id="save-status" style="margin-bottom:8px">${saveStatusText()}</div>`;
   let info='<div class="hint">暂无存档</div>';
@@ -5567,6 +5709,17 @@ function vSave(v){
   up.appendChild(ub);
   v.appendChild(up);
 
+  const st=el("div","card");
+  st.innerHTML="<h3>存储自检</h3><div class='hint'>存档莫名丢失时点这里，把结果截图发出来即可定位是哪一层存储被浏览器拦掉了</div><div class='hr'></div>";
+  const stb=el("button","","运行自检");
+  const stout=el("div","hint"); stout.style.cssText="margin-top:10px;word-break:break-all;line-height:1.8";
+  const paint=R=>{ stout.innerHTML=R.map(r=>
+    `<span style="color:${r.ok?"var(--acc)":"var(--bad)"}">${r.ok?"✔":"✘"}</span> <b>${esc(r.name)}</b>　${esc(r.msg)}`).join("<br>"); };
+  stb.onclick=()=>{ stb.disabled=true; stout.textContent="检测中…";
+    storageSelfTest(paint).then(R=>{ paint(R); stb.disabled=false; })
+      .catch(e=>{ stout.textContent="自检出错："+((e&&e.message)||e); stb.disabled=false; }); };
+  st.appendChild(stb); st.appendChild(stout); v.appendChild(st);
+
   const nn=el("div","card"); nn.innerHTML="<h3>重新开始</h3><div class='hint'>放弃当前进度，选择新的俱乐部</div><div class='hr'></div>";
   const nb=el("button","danger","开始新游戏");
   nb.onclick=()=>{ if(confirm("确定放弃当前进度并重新开始？")) newGameScreen(); };
@@ -5576,7 +5729,7 @@ function saveGame(){
   const s=JSON.stringify(WORLD);
   storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day})
     .then(()=>{ AUTOSAVE_DAY=WORLD.day; LAST_SAVE_AT=new Date(); SAVE_DIRTY=false; toast(`已保存（${(s.length/1048576).toFixed(2)} MB）`); if(VIEW==="save") render(); })
-    .catch(()=>toast("保存失败：浏览器存储空间不足，请改用导出文件","bad"));
+    .catch(err=>toast("保存失败："+((err&&err.message)||"浏览器存储不可用")+"，请改用导出文件","bad"));
 }
 function loadGame(){
   readSave().then(s=>{
@@ -5639,7 +5792,7 @@ function vHelp(v){
   <div class="card"><h3>快捷键</h3>
     <div class="hint">回车 = 继续　空格 = 比赛暂停/继续　Esc = 关闭弹窗　表头点击 = 排序　表格行点击 = 查看详情</div></div>
   <div class="card"><h3>存档</h3>
-    <div class="hint">每次操作后都会自动保存到本浏览器（IndexedDB），关掉页面再打开点「继续游戏」即可接着玩。清理浏览器数据会连存档一起清掉，想长期保留或换设备，请在「存档」页导出 .json 文件。</div></div>`;
+    <div class="hint">每次操作后都会自动保存到本浏览器，依次尝试 IndexedDB、Cache Storage、localStorage 三层，任意一层可用就存得住；关掉页面再打开点「继续游戏」即可接着玩。清理浏览器数据会连存档一起清掉，想长期保留或换设备，请在「存档」页导出 .json 文件。如果发现每次打开都要重新开局，去「存档」页底部跑一次「存储自检」。</div></div>`;
 }
 
 /* ---------- 启动菜单 ---------- */
@@ -5662,25 +5815,32 @@ function flushAutosave(force){
   try{
     const s=JSON.stringify(WORLD);
     storeSave(s,{club:UC().cn,season:WORLD.season,day:WORLD.day,auto:1})
-      .then(()=>{ LAST_SAVE_AT=new Date(); AUTOSAVE_DAY=WORLD.day; const el=document.getElementById("save-status"); if(el) el.textContent=saveStatusText(); })
-      .catch(()=>{ SAVE_DIRTY=true; })
+      .then(()=>{ SAVE_FAILS=0; SAVE_ERR=""; LAST_SAVE_AT=new Date(); AUTOSAVE_DAY=WORLD.day;
+        const el=document.getElementById("save-status"); if(el) el.textContent=saveStatusText(); })
+      .catch(err=>{ SAVE_DIRTY=true; SAVE_FAILS++; SAVE_ERR=(err&&err.message)||String(err);
+        const el=document.getElementById("save-status"); if(el) el.textContent=saveStatusText();
+        if(SAVE_FAILS===2 || SAVE_FAILS%15===0)
+          toast("自动保存失败，进度不会被保留！请到「存档」页导出存档文件","bad"); })
       .then(()=>{ SAVE_INFLIGHT=false; });
   }catch(e){ SAVE_INFLIGHT=false; SAVE_DIRTY=true; }
 }
 function saveStatusText(){
+  if(SAVE_FAILS>0) return `⚠ 连续 ${SAVE_FAILS} 次保存失败${SAVE_ERR?"："+SAVE_ERR:""}——请立刻导出存档文件`;
   if(!LAST_SAVE_AT) return SAVE_DIRTY? "有未保存的改动，稍后自动保存…" : "本局尚未自动保存";
   const d=LAST_SAVE_AT;
-  return `上次自动保存 ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`+(SAVE_DIRTY?"（有新改动待保存）":"");
+  return `上次自动保存 ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`
+    +(STORE_TIER?`（${STORE_TIER}）`:"")+(SAVE_DIRTY?"　有新改动待保存":"");
 }
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushAutosave(true); });
 window.addEventListener("pagehide",()=>flushAutosave(true));
 
-function saveMeta(){
+function saveMeta(){          // 同步版：只用于界面即时渲染，权威版是 async readMeta()
   try{
-    const raw=localStorage.getItem(SAVEKEY+"_meta"); if(!raw) return null;
-    const m=JSON.parse(raw);
-    return {club:m.club||"未知俱乐部", season:m.season, day:m.day||0, mb:m.mb||"?", auto:m.auto};
-  }catch(e){ return null; }
+    const raw=localStorage.getItem(METAKEY);
+    if(raw){ const m=JSON.parse(raw);
+      META_CACHE={club:m.club||"未知俱乐部", season:m.season, day:m.day||0, mb:m.mb||"?", auto:m.auto}; }
+  }catch(e){}
+  return META_CACHE;
 }
 function hasOldSave(){ try{ return !!localStorage.getItem(OLD_SAVEKEY); }catch(e){ return false; } }
 let AUTOSAVE_BUSY=false;
@@ -5698,9 +5858,10 @@ function continueGame(){
     catch(e){ toast(loadErrMsg(e),"bad"); newGameScreen(); }
   }).catch(()=>{ toast("存档无法读取","bad"); newGameScreen(); });
 }
-function startMenu(){
-  const m=saveMeta();
-  if(!m) return newGameScreen();          // 没有存档 → 直接进选队
+async function startMenu(){
+  let m=null;
+  try{ m=await readMeta(); }catch(e){ m=saveMeta(); }
+  if(!m) return newGameScreen();          // 三层都没有存档 → 直接进选队
   document.getElementById("app").style.display="none";
   const ls=document.getElementById("loadscr");
   ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;"+
@@ -5713,7 +5874,8 @@ function startMenu(){
     <div style="background:var(--bg3);border:1px solid var(--line);border-radius:8px;padding:11px;text-align:left">
       <div class="hint">上次进度</div>
       <div style="font-weight:700;font-size:15px;margin:2px 0">${esc(m.club)}</div>
-      <div class="hint">${m.season||"?"}/${m.season!=null?String(m.season+1).slice(2):"??"} 赛季 · 第 ${m.day} 天 · ${m.mb} MB</div>
+      <div class="hint">${m.recovered?"存档索引已丢失，但正文还在，可以直接继续":
+        `${m.season||"?"}/${m.season!=null?String(m.season+1).slice(2):"??"} 赛季 · 第 ${m.day} 天 · ${m.mb} MB`}</div>
     </div><div class="hr"></div>`;
   const mk=(cls,txt,fn)=>{ const b=el("button",cls,txt);
     b.style.cssText="display:block;width:100%;margin-top:9px;padding:11px"; b.onclick=fn; return b; };
@@ -5925,7 +6087,9 @@ window.addEventListener("DOMContentLoaded",()=>{
     if(e.key==="Enter" && !$("#modal").classList.contains("on")
        && (VIEW!=="match" || (CURMATCH && CURMATCH.done))) onContinue();
   });
-  setTimeout(()=>{ startMenu(); offlineHint(); },450);
+  // 申请持久化存储：能显著降低系统在存储紧张时清掉存档的概率（鸿蒙/iOS 尤其有用）
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{}); }catch(e){}
+  setTimeout(()=>{ Promise.resolve(startMenu()).catch(e=>{ try{toast("读取存档出错："+((e&&e.message)||e),"bad");}catch(_){} newGameScreen(); }); offlineHint(); },450);
 });
 
 /* ---------- 调试/测试桥接（顶层 let 绑定不会自动挂到 window） ---------- */
