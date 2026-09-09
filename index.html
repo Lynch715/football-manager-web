@@ -5532,28 +5532,63 @@ async function unzipSave(p){
   for(let i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&255;
   return await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
 }
-/* ---------- 统一读写 ---------- */
+/* ---------- 存档指纹：正文和索引都被清掉时，靠它认出「曾经有过存档」---------- */
+const FPKEY="fmweb_save_fp";
+async function writeFP(meta,bytes){
+  const fp=JSON.stringify({at:Date.now(),club:meta.club,day:meta.day,season:meta.season,bytes});
+  try{ localStorage.setItem(FPKEY,fp); }catch(e){}
+  try{ await idbSet(FPKEY,fp); }catch(e){}
+  try{ await cacheSet(FPKEY,fp); }catch(e){}
+}
+async function readFP(){
+  let raw=null;
+  try{ raw=localStorage.getItem(FPKEY); }catch(e){}
+  if(!raw){ try{ raw=await idbGet(FPKEY); }catch(e){} }
+  if(!raw){ try{ raw=await cacheGet(FPKEY); }catch(e){} }
+  try{ return raw? JSON.parse(raw): null; }catch(e){ return null; }
+}
+
+/* ---------- 统一读写 ----------
+   三层每次都写，不是「谁失败才轮到谁」。压缩后存档不到 1MB，localStorage 装得下，
+   而它恰恰是这类浏览器最不爱清的一层——Cache Storage 名字里带 cache，清理缓存时第一个遭殃。 */
 let META_CACHE=null;
 async function storeSave(str, meta){
   const payload=await zipSave(str);
   const mj=JSON.stringify({...meta, mb:(str.length/1048576).toFixed(2),
                            zmb:(payload.length/1048576).toFixed(2), at:Date.now()});
   const tiers=[]; let lastErr=null;
-  try{ await idbSet(SAVEKEY,payload); tiers.push("IndexedDB"); }catch(e){ lastErr=e; }
-  try{ await cacheSet(SAVEKEY,payload); tiers.push("Cache"); }catch(e){ lastErr=lastErr||e; }
-  if(tiers.length){ try{ localStorage.removeItem(SAVEKEY); }catch(e){} }
-  else{
-    try{ localStorage.setItem(SAVEKEY,payload); tiers.push("localStorage"); }
-    catch(e){ lastErr=e; }
-  }
-  // 索引三层都写，正文写失败也要留下痕迹，否则下次开机会当成「没有存档」
-  try{ localStorage.setItem(METAKEY,mj); }catch(e){}
-  try{ await idbSet(METAKEY,mj); }catch(e){}
-  try{ await cacheSet(METAKEY,mj); }catch(e){}
+  try{ await idbSet(SAVEKEY,payload); await idbSet(METAKEY,mj); tiers.push("IndexedDB"); }
+  catch(e){ lastErr=e; }
+  try{ localStorage.setItem(SAVEKEY,payload); localStorage.setItem(METAKEY,mj); tiers.push("localStorage"); }
+  catch(e){ lastErr=lastErr||e;
+    try{ localStorage.removeItem(SAVEKEY); localStorage.setItem(METAKEY,mj); }catch(_){} }  // 正文塞不下也要留索引
+  try{ await cacheSet(SAVEKEY,payload); await cacheSet(METAKEY,mj); tiers.push("Cache"); }
+  catch(e){ lastErr=lastErr||e; }
   try{ META_CACHE=JSON.parse(mj); }catch(e){}
   if(!tiers.length) throw new Error("三层存储全部写入失败"+(lastErr&&lastErr.message?("："+lastErr.message):""));
+  await writeFP(meta,payload.length);
   STORE_TIER=tiers.join(" + ");
   return STORE_TIER;
+}
+/* ---------- 自愈：读档时把缺失的层补回去 ----------
+   Service Worker 升级会连带清掉 Cache 桶，浏览器也可能单独清某一层。
+   每次成功读档都补一次，存档只会越补越全，不会越掉越少。 */
+async function healSave(){
+  const have={idb:null,ls:null,cache:null};
+  try{ have.idb=await idbGet(SAVEKEY)||null; }catch(e){}
+  try{ have.ls=localStorage.getItem(SAVEKEY)||null; }catch(e){}
+  try{ have.cache=await cacheGet(SAVEKEY)||null; }catch(e){}
+  const payload=have.idb||have.ls||have.cache;
+  if(!payload) return [];
+  let mj=null;
+  try{ mj=localStorage.getItem(METAKEY); }catch(e){}
+  if(!mj){ try{ mj=await idbGet(METAKEY); }catch(e){} }
+  if(!mj){ try{ mj=await cacheGet(METAKEY); }catch(e){} }
+  const fixed=[];
+  if(!have.idb){ try{ await idbSet(SAVEKEY,payload); if(mj) await idbSet(METAKEY,mj); fixed.push("IndexedDB"); }catch(e){} }
+  if(!have.ls){ try{ localStorage.setItem(SAVEKEY,payload); if(mj) localStorage.setItem(METAKEY,mj); fixed.push("localStorage"); }catch(e){} }
+  if(!have.cache){ try{ await cacheSet(SAVEKEY,payload); if(mj) await cacheSet(METAKEY,mj); fixed.push("Cache"); }catch(e){} }
+  return fixed;
 }
 async function readRawSave(){
   let p=null;
@@ -5583,7 +5618,7 @@ async function readMeta(){
   return null;
 }
 async function deleteSave(){
-  for(const k of [SAVEKEY,METAKEY]){
+  for(const k of [SAVEKEY,METAKEY,FPKEY]){
     try{ await idbDel(k); }catch(e){}
     try{ await cacheDel(k); }catch(e){}
     try{ localStorage.removeItem(k); }catch(e){}
@@ -5652,6 +5687,11 @@ async function storageSelfTest(onStep){
         +(ps===null?"":`　持久化：${ps?"已授予（系统不会随手清）":"未授予（系统紧张时可能清掉）"}`));
     } else log("配额",true,"内核不提供 storage.estimate");
   }catch(e){ log("配额",false,String((e&&e.message)||e)); }
+
+  try{ if(typeof caches!=="undefined"){ const ks=await caches.keys();
+      log("浏览器缓存桶",ks.indexOf(CACHE_NS)>=0,ks.length?ks.join("、"):"（空）"); } }catch(e){}
+  try{ const fp=await readFP();
+    log("存档指纹",!!fp,fp?`${fp.club||"?"} 第 ${fp.day} 天，${new Date(fp.at).toLocaleString()}`:"没有——本机从未成功保存过"); }catch(e){}
 
   const where=[],mw=[];
   try{ if(await idbGet(SAVEKEY)) where.push("IndexedDB"); }catch(e){}
@@ -5735,7 +5775,8 @@ function loadGame(){
   readSave().then(s=>{
     if(!s){ toast("没有找到存档","bad"); return; }
     try{ adoptWorld(JSON.parse(s)); render(); toast("存档已载入"); }
-    catch(e){ toast(loadErrMsg(e),"bad"); }
+    catch(e){ toast(loadErrMsg(e),"bad"); return; }
+    healSave().then(fx=>{ if(fx.length) toast("已把存档补写回 "+fx.join("、")); }).catch(()=>{});
   }).catch(()=>toast("读取失败","bad"));
 }
 function exportSave(){
@@ -5852,16 +5893,53 @@ function enterGame(){
 }
 function continueGame(){
   toast("正在读取存档…");
-  readSave().then(s=>{
-    if(!s){ toast("没有找到存档","bad"); newGameScreen(); return; }
+  readSave().then(async s=>{
+    if(!s){                                  // 索引在但正文没了 = 被浏览器清过
+      const fp=await readFP();
+      if(fp) return wipedScreen(fp);
+      toast("没有找到存档","bad"); newGameScreen(); return;
+    }
     try{ adoptWorld(JSON.parse(s)); enterGame(); toast("已载入存档"); }
-    catch(e){ toast(loadErrMsg(e),"bad"); newGameScreen(); }
+    catch(e){ toast(loadErrMsg(e),"bad"); newGameScreen(); return; }
+    healSave().then(fx=>{ if(fx.length) toast("已把存档补写回 "+fx.join("、")); }).catch(()=>{});
   }).catch(()=>{ toast("存档无法读取","bad"); newGameScreen(); });
+}
+function wipedScreen(fp){
+  document.getElementById("app").style.display="none";
+  const ls=document.getElementById("loadscr");
+  ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;"+
+    "display:flex;align-items:center;justify-content:center;"+SCR_PAD;
+  ls.innerHTML="";
+  const d=new Date(fp.at||Date.now());
+  const when=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  const box=el("div","card");
+  box.style.cssText="max-width:400px;width:100%;padding:24px 22px;border-color:var(--bad)";
+  box.innerHTML=`<h1 style="font-size:20px;color:var(--bad);margin-bottom:10px">存档被浏览器清掉了</h1>
+    <div class="hint" style="line-height:1.8">最后一次保存：<b>${esc(fp.club||"未知俱乐部")}</b>${fp.day!=null?` · 第 ${fp.day} 天`:""}<br>时间：${when}<br><br>
+    游戏本身没坏，是浏览器把本站的存储数据清空了。常见原因：浏览器设置里开了「退出时清除数据」或「智能防跟踪」，或者系统存储不足自动清理。<br><br>
+    建议：把本页「添加到主屏幕」后从桌面图标打开，并在浏览器设置里把本站加入白名单；平时在「存档」页导出 .json 文件留底。</div>
+    <div class="hr"></div>`;
+  const mk=(cls,txt,fn)=>{ const b=el("button",cls,txt);
+    b.style.cssText="display:block;width:100%;margin-top:9px;padding:11px"; b.onclick=fn; return b; };
+  const inp=el("input"); inp.type="file"; inp.accept=".json"; inp.style.display="none";
+  inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{ try{ adoptWorld(JSON.parse(r.result)); enterGame(); toast("存档已导入"); autoSave(); }
+      catch(err){ toast(loadErrMsg(err),"bad"); } };
+    r.readAsText(f); };
+  box.appendChild(mk("pri","📂 导入之前导出的存档文件", ()=>inp.click()));
+  box.appendChild(inp);
+  box.appendChild(mk("","＋ 重新开一局", ()=>newGameScreen()));
+  ls.appendChild(box);
 }
 async function startMenu(){
   let m=null;
   try{ m=await readMeta(); }catch(e){ m=saveMeta(); }
-  if(!m) return newGameScreen();          // 三层都没有存档 → 直接进选队
+  if(!m){
+    let fp=null; try{ fp=await readFP(); }catch(e){}
+    if(fp) return wipedScreen(fp);         // 曾经存过档但被清了 → 说清楚，别默默开新局
+    return newGameScreen();                // 真的从没存过 → 直接进选队
+  }
   document.getElementById("app").style.display="none";
   const ls=document.getElementById("loadscr");
   ls.style.cssText="position:fixed;inset:0;background:var(--bg);z-index:300;overflow-y:auto;"+
@@ -6023,7 +6101,8 @@ function applyUpdate(){
   if(!("serviceWorker" in navigator)){ location.reload(); return; }
   navigator.serviceWorker.getRegistrations()
     .then(rs=>Promise.all(rs.map(r=>r.unregister())))
-    .then(()=>caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))))
+    .then(()=>caches.keys().then(ks=>Promise.all(
+        ks.filter(k=>k!==CACHE_NS).map(k=>caches.delete(k)))))   // 只清资源缓存，存档桶必须留着
     .catch(()=>{})
     .then(()=>location.reload(true));
 }

@@ -1,6 +1,8 @@
 /* 足球经理 · Service Worker
    策略：网络优先，失败回落缓存。保证联网时永远拿到最新版本，断网时仍可开局。*/
-const VERSION = "fmweb-v29";
+const VERSION = "fmweb-v30";
+/* 存档桶：游戏把存档也放在 Cache Storage 里做冗余，清理资源缓存时绝不能连它一起删 */
+const SAVE_CACHE = "fmweb-saves";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
@@ -14,7 +16,7 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== SAVE_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
