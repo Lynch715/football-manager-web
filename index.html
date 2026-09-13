@@ -1408,7 +1408,7 @@ function newWorld(seed, userClubEn){
     }
   });
   WORLD.clubs.forEach(c=>genSquad(c));
-  WORLD.clubs.forEach(c=>{ c.finance.wageBudget=calcWageBudget(c); resetBudgetShift(c); });
+  WORLD.clubs.forEach(c=>{ c.finance.wageBudget=calcWageBudget(c,true); resetBudgetShift(c); });
   WORLD.clubs.forEach(c=>{ if(c.en!==userClubEn) c.tactic.formation=pick(AI_FORMS); c.tactic.fmtV2=1; });
   WORLD.clubs.forEach(c=>{ autoPickLineup(c); });
   // 自由球员
@@ -2712,17 +2712,25 @@ function windowName(){ const m=dateOf(WORLD.day).getMonth()+1; return m===8?"夏
 
 function wageBill(c){ return weeklyWages(c)*52; }
 // 年度工资预算：随声望浮动，并保证不低于现有薪资总额的 1.12 倍（小球会也要有签人空间）
-function calcWageBudget(c){
+function calcWageBudget(c, noCeil){
   const base = Math.pow(c.rep,2.48)*2350 + 1200000;
-  return Math.round(Math.max(base, wageBill(c)*1.12)/1000)*1000;
+  /* 兜底仍是「薪资总额 *1.12」，但董事会每季最多认 8% 的自然增长（以赛季初的 wageBase 为准）。
+     否则靠预算调配借来的薪资空间会在下一季被这条兜底自动合法化，一次性现金就变成了永久工资预算。
+     noCeil 用于建世界 / 旧档迁移 / 升级补强——那几处的薪资总额是既成事实，不该判成超支。 */
+  const wb = c.finance? c.finance.wageBase : null;
+  const ceil = (noCeil || !(wb>0))? Infinity : wb*1.08;
+  return Math.round(Math.max(base, Math.min(wageBill(c)*1.12, ceil))/1000)*1000;
 }
 // 剩余年薪空间（可用于新合同）
 function wageRoom(c){ return Math.max(0, c.finance.wageBudget - wageBill(c)); }
 
 /* ===== 预算调配：转会预算 ⇄ 年薪空间 =====
    f.shift 记录本赛季净调配额（年 £，正=转会预算换成了薪资空间）。
-   正向 1:1；把薪资空间变现回转会预算按 WAGE_SHIFT_BACK 折价，
-   但「撤销之前的正向调配」不打折——shiftCost() 就是这条分段折线。   */
+   转会预算是一次性的钱、年薪空间是每年的钱，所以正向不能 1:1：
+   WAGE_SHIFT_RATE=0.5 表示 £2 转会预算换 £1/年 薪资空间。
+   反向变现按 WAGE_SHIFT_BACK 折价，但「撤销之前的正向调配」不打折
+   ——shiftCost() 就是这条分段折线，天然不可套利。   */
+const WAGE_SHIFT_RATE = 0.5;
 const WAGE_SHIFT_BACK = 0.75;
 function fin(c){
   const f=c.finance;
@@ -2734,14 +2742,18 @@ function fin(c){
 function resetBudgetShift(c){ const f=c.finance; f.wageBase=f.wageBudget; f.trBase=f.transferBudget; f.shift=0; }
 // 董事会追加工资预算（青训入队等非主动签约造成的超支），不占用调配额度
 function grantWageBudget(c, amount){ const f=fin(c); amount=Math.round(amount); f.wageBudget+=amount; f.wageBase+=amount; }
-function shiftCost(x){ return x>=0? x : x*WAGE_SHIFT_BACK; }   // 达到该调配额累计付出的转会预算
-function shiftCapUp(c){   const f=fin(c); return Math.max(0, Math.round(Math.min(f.trBase*0.50, f.wageBase*0.25))); }
+// 达到该调配额累计付出的转会预算（正数=花钱，负数=变现拿回）
+function shiftCost(x){ return x>=0? x/WAGE_SHIFT_RATE : x*WAGE_SHIFT_BACK; }
+// shiftCost 的反函数：给定能动用的转会预算，换得多少年薪空间
+function shiftFromCost(v){ return v>=0? v*WAGE_SHIFT_RATE : v/WAGE_SHIFT_BACK; }
+// 调入上限：最多拿出一半赛季初转会预算（按汇率折成薪资空间），且工资预算涨幅不超过 25%
+function shiftCapUp(c){   const f=fin(c); return Math.max(0, Math.round(Math.min(shiftFromCost(f.trBase*0.50), f.wageBase*0.25))); }
 function shiftCapDown(c){ const f=fin(c); return Math.max(0, Math.round(f.wageBase*0.25)); }
 // 当前可选的调配区间；reserve = 需要留给转会费的钱
 function shiftRange(c, reserve){
   const f=fin(c), avail=Math.max(0, f.transferBudget-(reserve||0));
   const maxCost=shiftCost(f.shift)+avail;
-  let up=Math.min(shiftCapUp(c), maxCost>=0? maxCost : maxCost/WAGE_SHIFT_BACK);
+  let up=Math.min(shiftCapUp(c), shiftFromCost(maxCost));
   let dn=Math.max(-shiftCapDown(c), f.shift-(f.wageBudget-wageBill(c)*1.05));
   if(dn>up){ dn=up=f.shift; }
   return [Math.round(dn), Math.round(up)];
@@ -3218,17 +3230,31 @@ function aiTransferRound(tries){
     transferPlayer(tgt.id, buyer.id, fee, wage, ri(2,5));
     bigTransferNews(tgt, seller, buyer, fee);
   }
-  // 自由球员签约
-  for(let k=0;k<ri(0,2);k++){
+  // 自由球员签约。门槛原来是 rep*1.2，把中游队全挡在门外，市场清不掉
+  const faN=(WORLD.freeAgents||[]).length;
+  const faTries = faN<60? ri(0,1) : isDeadline()? ri(2,6) : ri(1,3);
+  for(let k=0;k<faTries;k++){
     const buyer=WORLD.clubs[Math.floor(rnd()*WORLD.clubs.length)];
     if(buyer.id===u.id||buyer.squad.length>=28) continue;
+    const bMed=squadMedCA(buyer);
     const fa=WORLD.freeAgents.filter(i=>{ const q=P(i); if(!q) return false;
-      return q.ca>buyer.rep*1.2 || (q.age<=20 && q.pa>=150); });   // 潜力股也要抢
+      return q.ca>=bMed*0.85 || (q.age<=20 && q.pa>=150); });   // 潜力股也要抢
     if(!fa.length) continue;
     const id=pick(fa), fw=wageDemand(P(id),buyer);
     if(!aiAffordWage(buyer, fw*52, 0)) continue;
-    transferPlayer(id, buyer.id, 0, fw, ri(1,3));
+    transferPlayer(id, buyer.id, 0, fw, ri(2,4));
   }
+  // 高能力自由球员不该在市场上挂一整年：CA>=150 的每天都有强队来抢
+  (WORLD.freeAgents||[]).slice().forEach(id=>{
+    const p=P(id); if(!p || p.ca<150 || rnd()>=0.25) return;
+    const cands=WORLD.clubs.filter(b=>b.id!==u.id && b.rep>=70 && b.squad.length<28);
+    if(!cands.length) return;
+    const b=pickW(cands, cands.map(x=>Math.pow(x.rep,2.2)));
+    if(!b) return;
+    const w=wageDemand(p,b);
+    if(!aiAffordWage(b, w*52, 0)) return;
+    transferPlayer(id, b.id, 0, w, ri(2,4));
+  });
 }
 // 传奇之种 / 妖人如果玩家不出手，就会被别的俱乐部签走——错过就是真错过
 function poachProspects(){
@@ -3283,13 +3309,18 @@ function aiListSurplus(){
 }
 function marketDaily(){
   const u=UC();
-  // AI 清理冗员：阵容超编时解约最弱的球员（截止日前后更频繁）
+  // AI 清理冗员：先想办法卖掉或租出去，只有窗口最后几天还清不掉才解约（以前是直接白送）
   WORLD.clubs.forEach(c=>{
     if(c.id===u.id || c.squad.length<=27) return;
-    if(rnd()>(isDeadline()?0.6:0.15)) return;
     const ps=c.squad.map(i=>P(i)).filter(p=>!p.loan && canSell(c,p));
     if(!ps.length) return;
     const worst=ps.sort((a,b)=>(a.ca+(a.pa-a.ca)*0.5)-(b.ca+(b.pa-b.ca)*0.5))[0];
+    if(windowEndDay()-WORLD.day>3){
+      // 一半挂牌（挂牌有折价、买家会上门），一半留着不挂牌——aiWillLoanOut 只认没挂牌的人
+      if(!worst.listed && rnd()<0.5) worst.listed=true;
+      return;
+    }
+    if(rnd()>0.5) return;
     c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; worst.listed=false; worst.wage=marketWage(worst); WORLD.freeAgents.push(worst.id);
   });
   aiTransferRound();
@@ -3736,6 +3767,53 @@ function youthIntake(){
 }
 
 // ---------- 赛季结算 ----------
+/* AI 续约决策。旧写法 `p.ca > c.rep*1.7` 把 CA(0~200) 和 rep(0~100) 两个量纲混在一起，
+   变成一个绝对阈值：rep94 的豪门阈值 CA162，队内一半主力够不着就被白白放走；
+   rep45 的中游队阈值 77 也高于队内 CA 中位 68。改成看他在本队的地位。 */
+// 队内中位 CA。凡是「这人配不配得上这支队」的判断都用它，不要再拿 rep 乘个系数当 CA 门槛
+function squadMedCA(c){
+  const a=c.squad.map(i=>P(i)).filter(q=>q).map(q=>q.ca).sort((x,y)=>x-y);
+  return a.length? a[a.length>>1] : 0;
+}
+function aiRenewDecide(c, p){
+  const mates=c.squad.map(i=>P(i)).filter(q=>q && q.id!==p.id);
+  const better=mates.filter(q=>q.ca>p.ca).length;                     // 队内比他强的人数
+  const samePos=mates.filter(q=>q.pos===p.pos && q.ca>p.ca).length;   // 同位置比他强的人数
+  const prospect = p.age<=23 && p.pa-p.ca>=20;
+  let pr;
+  if(samePos===0 || better<11) pr=0.92;        // 同位置第一 / 队内前 11：主力
+  else if(prospect)            pr=0.85;        // 潜力股不看现在的能力
+  else if(better<18)           pr=0.70;        // 轮换
+  else                         pr=0.15;        // 边缘人
+  if(p.age>=34)      pr=Math.min(pr,0.15);
+  else if(p.age>=32) pr*=0.7;
+  if(p.morale<35) pr*=0.8;
+  if((p.unrest||0)>=2) pr*=0.5;
+  if(rnd()>=pr) return false;
+  // 钱：新合同要占得下工资空间（只算涨薪的增量，他现在的工资已经在 wageBill 里）。
+  // 占不下就是真的「续不起」——这才是有据可查的少数情况。
+  const want=Math.max(p.wage, calcWage(p,c.rep));
+  const extra=(want-p.wage)*52;
+  if(extra<=0) return true;                 // 原薪续约不增加薪资总额，超支的队也该留得住人
+  return aiAffordWage(c, extra, 0);
+}
+// 提前续约：合同只剩 1 年的先谈掉，别让所有合同都跑到零再赌一次闸门
+function aiExtendContracts(){
+  WORLD.clubs.forEach(c=>{
+    if(c.id===WORLD.userClub) return;
+    c.squad.slice().forEach(i=>{
+      const p=P(i); if(!p || p.loan) return;
+      // 剩 1 年的重点谈，剩 2 年的偶尔提前锁定——顺便把建世界时扎堆的合同年限摊开，
+      // 否则开局第 3 季会有一波集体到期（实测 24% 的合同同时到期）
+      const left=p.contract-WORLD.season;
+      if(left!==1 && left!==2) return;
+      if(rnd() >= (left===1? 0.55 : 0.22)) return;
+      if(!aiRenewDecide(c,p)) return;
+      p.contract=WORLD.season+ri(3,5);
+      p.wage=Math.max(p.wage, calcWage(p,c.rep));
+    });
+  });
+}
 function endSeason(){
   processLoanExpiry(true);                     // 外租球员先全部归队，再处理合同到期 / 退役
   const summary={season:WORLD.season, leagues:[], cups:WORLD.cups.map(c=>c.winner),
@@ -3816,6 +3894,8 @@ function endSeason(){
     WORLD.gameOver=`在 ${u.cn} 执教 ${tenure} 个赛季后，董事会决定解除你的主教练职务。最终排名第 ${u.lastRank} 位，远低于「${u.board.expect}」的期望。`;
   }
 
+  aiExtendContracts();          // 先谈提前续约，再处理到期合同
+
   // 年龄 / 合同 / 退役
   Object.values(WORLD.players).forEach(p=>{
     p.age++;
@@ -3832,7 +3912,7 @@ function endSeason(){
       const c=C(p.clubId);
       if(c.id!==WORLD.userClub || rnd()<0.5){
         // AI 自动续约 / 放走
-        if(p.ca> c.rep*1.7 && rnd()<0.8){ p.contract=WORLD.season+1+ri(1,4); p.wage=Math.max(p.wage, calcWage(p,c.rep)); }
+        if(aiRenewDecide(c,p)){ p.contract=WORLD.season+1+ri(1,4); p.wage=Math.max(p.wage, calcWage(p,c.rep)); }
         else { c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; p.wage=marketWage(p); WORLD.freeAgents.push(p.id); }
       } else {
         c.squad=c.squad.filter(i=>i!==p.id); p.clubId=-1; p.wage=marketWage(p); WORLD.freeAgents.push(p.id);
@@ -3848,9 +3928,17 @@ function endSeason(){
     while(c.squad.length<20 && guard++<25){
       const pos=SQUAD_TEMPLATE.find(([ps,n])=>c.squad.filter(i=>P(i).pos===ps).length<n);
       const usePos = pos? pos[0] : pick(POSITIONS);
-      const fa=WORLD.freeAgents.filter(i=>P(i).pos===usePos);
-      if(fa.length && rnd()<0.6){
-        const id=pick(fa); transferPlayer(id, c.id, 0, calcWage(P(id),c.rep), ri(1,3));
+      // 先翻自由市场：以前 40% 的概率直接凭空造人，市场上的人反而没人要
+      const fa=WORLD.freeAgents.filter(i=>{const q=P(i); return q && q.pos===usePos;});
+      // 门槛用队内中位 CA，不用 rep——rep*0.9 当 CA 门槛会把 CA60 的人塞进 CA150 的队
+      const med=squadMedCA(c);
+      const good=fa.filter(i=>P(i).ca>=med*0.85).sort((a,b)=>P(b).ca-P(a).ca);
+      // 市场厚的时候优先消化市场、薄的时候才凭空造人——这条同时兼任球员总量的调节阀
+      const useFA = WORLD.freeAgents.length>=100? 0.90 : 0.35;
+      if(good.length && rnd()<useFA){
+        // 这里跑在 WORLD.season++ 之前，年限要 +1，否则 ri(1,3) 实际只剩 0~2 年（一半人下季末又到期）
+        const id=good[Math.floor(Math.pow(rnd(),1.6)*Math.min(good.length,6))];
+        transferPlayer(id, c.id, 0, calcWage(P(id),c.rep), 1+ri(1,3));
       } else {
         const p=makePlayer(clamp(gauss(c.rep*0.9,7),8,95), usePos, ri(18,29), c.id);
         p.wage=calcWage(p,c.rep); p.value=calcValue(p); p.contract=WORLD.season+1+ri(1,4);
@@ -3875,6 +3963,14 @@ function endSeason(){
   // 自由球员市场容量上限，避免逐年膨胀（在各队清理冗员之后执行，只留最好的一批）
   WORLD.freeAgents.sort((a,b)=>(P(b).ca+(P(b).pa-P(b).ca)*0.5)-(P(a).ca+(P(a).pa-P(a).ca)*0.5));
   WORLD.freeAgents.splice(220).forEach(id=>{ delete WORLD.players[id]; });
+  /* 自由市场保底：AI 不再白白放人之后，池子会被逐季抽干（实测 10 季后归零、
+     全联盟阵容卡在 20 人、谁都没人可签）。这里补一批「下级联赛 / 解约球员」进市场，
+     能力刻意压低——市场要有货，但不该有球星。这一条和 220 上限一起把池子夹在 120~220。 */
+  for(let need=120-WORLD.freeAgents.length; need>0; need--){
+    const q=makePlayer(clamp(gauss(36,13),8,72), pick(POSITIONS), ri(19,32), -1);
+    q.wage=marketWage(q); q.value=Math.round(calcValue(q)*0.4); q.contract=WORLD.season;
+    WORLD.players[q.id]=q; WORLD.freeAgents.push(q.id);
+  }
   ensureAllNumbers();
   // 清理关注名单里已不存在的球员（退役 / 自由市场清理）
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
@@ -3927,7 +4023,7 @@ function bridgeTiers(moves){
           if(worst){ c.squad=c.squad.filter(i=>i!==worst.id); worst.clubId=-1; worst.wage=marketWage(worst); WORLD.freeAgents.push(worst.id); }
         }
       }
-      if(added){ c.finance.wageBudget=calcWageBudget(c); resetBudgetShift(c); autoPickLineup(c); if(c.nation===u.nation && c.tier===u.tier) news(`${c.cn} 升级后大举补强`,`为了在 ${NATIONS[mv.nation].tiers[mv.tier].name} 站稳脚跟，${c.cn} 一口气引进了 ${added} 名球员。`,"info"); }
+      if(added){ c.finance.wageBudget=calcWageBudget(c,true); resetBudgetShift(c); autoPickLineup(c); if(c.nation===u.nation && c.tier===u.tier) news(`${c.cn} 升级后大举补强`,`为了在 ${NATIONS[mv.nation].tiers[mv.tier].name} 站稳脚跟，${c.cn} 一口气引进了 ${added} 名球员。`,"info"); }
     });
     // 降班马：核心球员离队
     mv.relegated.forEach(id=>{
@@ -5041,7 +5137,8 @@ function budgetShiftCard(c){
   card.innerHTML=`<h3>预算调配 <span class="hint" style="font-weight:400">转会预算 ⇄ 年薪空间</span></h3>`;
   const capU=shiftCapUp(c), capD=shiftCapDown(c);
   card.appendChild(el("div","hint",
-    `董事会允许你在两笔预算之间腾挪：<b>转会预算按 1:1 换成年薪空间</b>（${money(1000000)} 转会费 ≈ ${money(Math.round(1000000/52))}/周）；`+
+    `董事会允许你在两笔预算之间腾挪。转会费是一次性的钱、年薪是每年都要付的钱，所以换算不是 1:1：`+
+    `<b>${money(Math.round(1/WAGE_SHIFT_RATE*1000000))} 转会预算 = ${money(1000000)}/年 薪资空间</b>（每周 ${money(Math.round(1000000/52))}）；`+
     `<b>反向变现按 ${Math.round(WAGE_SHIFT_BACK*100)}% 折价</b>，但撤回本赛季已调入的部分不打折。`+
     `本赛季额度：最多调入 ${money(capU)}、调出 ${money(capD)}，赛季结束后按声望重新核定。`));
   if(!open){
@@ -6212,7 +6309,7 @@ function migrateWorld(){
   WORLD.clubs.forEach(c=>{ if(!c.loanedOut) c.loanedOut=[]; });   // 外租索引（2026-09 新增）
   if(!WORLD.valueV2){ Object.values(WORLD.players).forEach(p=>{ if(p) p.value=calcValue(p); }); WORLD.valueV2=1; }   // 身价公式 V2（2026-09-12）
   if(WORLD.wageFix2) return;
-  WORLD.clubs.forEach(c=>{ c.finance.wageBudget = calcWageBudget(c); resetBudgetShift(c); });
+  WORLD.clubs.forEach(c=>{ c.finance.wageBudget = calcWageBudget(c,true); resetBudgetShift(c); });
   (WORLD.freeAgents||[]).forEach(id=>{ const p=P(id); if(p) p.wage=marketWage(p); });
   WORLD.wageFix2 = 1;
 }
