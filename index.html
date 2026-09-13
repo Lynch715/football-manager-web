@@ -2745,12 +2745,25 @@ function grantWageBudget(c, amount){ const f=fin(c); amount=Math.round(amount); 
 function shiftCost(x){ return x>=0? x/WAGE_SHIFT_RATE : x*WAGE_SHIFT_BACK; }
 // shiftCost 的反函数：给定能动用的转会预算，换得多少年薪空间
 function shiftFromCost(v){ return v>=0? v*WAGE_SHIFT_RATE : v/WAGE_SHIFT_BACK; }
-/* 调入上限只管「结构」：工资预算最多撑高 25%。
+/* 调入上限只管「结构」：工资预算最多撑高 40%。
    付不付得起是另一回事，由 shiftRange 里的 avail（当前转会预算）实时卡。
    曾经还有一项 trBase*0.50，用的是赛季初转会预算——结果小球会赛季中卖了球星、
-   手里 £4.6M 现金，额度却还钉在赛季初的 £260K 上，只能挪 £65K。已删。 */
-function shiftCapUp(c){   const f=fin(c); return Math.max(0, Math.round(f.wageBase*0.25)); }
-function shiftCapDown(c){ const f=fin(c); return Math.max(0, Math.round(f.wageBase*0.25)); }
+   手里 £4.6M 现金，额度却还钉在赛季初的 £260K 上，只能挪 £65K。已删。
+   2026-09-13 从 25% 提到 40%：玩家实测 rep23 的莱顿东方 1 月已把 25%（£1.70M）
+   拉满，手里还剩 £3.95M 转会预算，而想签的那份 3 年合同总工资才 £3.28M——
+   「钱明明够付却不让换」说不过去。调出方向仍是 25%，不动。*/
+const WAGE_SHIFT_CAP_UP = 0.40, WAGE_SHIFT_CAP_DOWN = 0.25;
+function shiftCapUp(c){   const f=fin(c); return Math.max(0, Math.round(f.wageBase*WAGE_SHIFT_CAP_UP)); }
+function shiftCapDown(c){ const f=fin(c); return Math.max(0, Math.round(f.wageBase*WAGE_SHIFT_CAP_DOWN)); }
+/* 「超出工资预算」的说明文案。玩家最常见的困惑是「我明明还有一大笔转会预算」，
+   所以要说清差多少、调配还能不能补、是不是已经拉满，别只甩四个字。*/
+function wageGapMsg(c, gap, reserve){
+  const f=fin(c), [,up]=shiftRange(c, reserve||0), more=Math.max(0, up-f.shift);
+  if(more>=gap) return `超出工资预算 ${money(gap)}/年——可在「财政 → 预算调配」把转会预算换成年薪空间`;
+  if(f.shift>=shiftCapUp(c)-1000)
+    return `超出工资预算 ${money(gap)}/年；本赛季调配额度已用满（${money(shiftCapUp(c))}），只能先卖人、降薪，或等下赛季董事会重新核定`;
+  return `超出工资预算 ${money(gap)}/年；剩下的转会预算只够再换 ${money(more)}/年，仍差 ${money(gap-more)}/年`;
+}
 // 当前可选的调配区间；reserve = 需要留给转会费的钱
 function shiftRange(c, reserve){
   const f=fin(c), avail=Math.max(0, f.transferBudget-(reserve||0));
@@ -4594,7 +4607,8 @@ function submitLoanIn(pid){
   if(p.loan || !aiWillLoanOut(p)){ closeModal(); toast("对方改变了主意","bad"); return; }
   const owner=C(p.clubId), t=loanTermsFor(p,u); t.half=!!($("#li-half")&&$("#li-half").value==="1");
   if(t.fee>u.finance.transferBudget){ toast("超出转会预算","bad"); return; }
-  if(wageBill(u)+p.wage*t.wageShare*52>u.finance.wageBudget){ toast("超出工资预算——可在「财政 → 预算调配」腾挪","bad"); return; }
+  if(wageBill(u)+p.wage*t.wageShare*52>u.finance.wageBudget){
+    toast(wageGapMsg(u, wageBill(u)+p.wage*t.wageShare*52-u.finance.wageBudget, t.fee||0),"bad"); return; }
   if(u.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
   if(owner.rep>u.rep+14 && rnd()<0.5){ toast(`${p.cn} 不愿被租到层级更低的球队`,"bad"); closeModal(); return; }
   loanPlayer(pid,u.id,t);
@@ -5073,8 +5087,8 @@ function submitBid(pid){
   const ask=isFA?0:askingPrice(p), need=wageDemand(p,c);
   if(fee>c.finance.transferBudget){ toast("超出转会预算","bad"); return; }
   if(wageBill(c)+wg*52>c.finance.wageBudget){
-    const gap=wageBill(c)+wg*52-c.finance.wageBudget, [,up]=shiftRange(c,fee);
-    toast(up-fin(c).shift>=gap? `超出工资预算 ${money(gap)}/年——可在「财政 → 预算调配」把转会预算换成年薪空间` : "超出工资预算","bad");
+    const gap=wageBill(c)+wg*52-c.finance.wageBudget;
+    toast(wageGapMsg(c, gap, fee),"bad");
     return; }
   if(c.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
   const seller=p.clubId>=0?C(p.clubId):null;
@@ -5118,8 +5132,8 @@ function doRenew(pid,need){
   if(w<need*0.95){ toast(`${p.cn} 拒绝了这份合同`,"bad"); return; }
   const shareK = p.loan? (1-p.loan.wageShare) : 1;
   if(wageBill(c)+(w-p.wage)*52*shareK>c.finance.wageBudget){
-    const gap=wageBill(c)+(w-p.wage)*52*shareK-c.finance.wageBudget, [,up]=shiftRange(c);
-    toast(up-fin(c).shift>=gap? `超出工资预算 ${money(gap)}/年——可在「财政 → 预算调配」腾挪` : "超出工资预算","bad");
+    const gap=wageBill(c)+(w-p.wage)*52*shareK-c.finance.wageBudget;
+    toast(wageGapMsg(c, gap),"bad");
     return; }
   p.wage=w; p.contract=WORLD.season+y; p.morale=clamp(p.morale+10,5,100); p.value=calcValue(p);
   toast(`${p.cn} 已续约至 ${p.contract} 年`); closeModal(); render();
@@ -5180,7 +5194,7 @@ function budgetShiftCard(c){
     `董事会允许你在两笔预算之间腾挪。转会费是一次性的钱、年薪是每年都要付的钱，所以换算不是 1:1：`+
     `<b>${money(Math.round(1/WAGE_SHIFT_RATE*1000000))} 转会预算 = ${money(1000000)}/年 薪资空间</b>（每周 ${money(Math.round(1000000/52))}）；`+
     `<b>反向变现按 ${Math.round(WAGE_SHIFT_BACK*100)}% 折价</b>，但撤回本赛季已调入的部分不打折。`+
-    `本赛季额度：工资预算最多上下浮动 ${money(capU)}（赛季初额度的 25%），调入还得付得起转会预算；赛季结束后按声望重新核定。`));
+    `本赛季额度：最多调入 ${money(capU)}（赛季初工资预算的 ${Math.round(WAGE_SHIFT_CAP_UP*100)}%）、调出 ${money(capD)}（${Math.round(WAGE_SHIFT_CAP_DOWN*100)}%），调入还得付得起转会预算；赛季结束后按声望重新核定。`));
   if(!open){
     card.appendChild(el("div","empty","转会窗关闭期间无法调整预算结构"));
     if(f.shift) card.appendChild(el("div","hint",`当前已${f.shift>0?"调入":"调出"} ${money(Math.abs(f.shift))}/年。`));
