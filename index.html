@@ -2846,15 +2846,18 @@ function expiringWages(c){
    1 现金——这季付得起（转会费 + 本季要付的工资）；
    2 结构——下季承诺工资不超过预计营收的 k，防止把全部可用资金签成多年工资。
    fee 转会费(£)，annual 该合同年薪(£/年，租借传己方承担部分)，
-   opt.weeks 本季实际要付的周数（默认 remWeeks），opt.nextYear=false 表示下季不在（租借）。*/
+   opt.weeks 本季实际要付的周数（默认 remWeeks），opt.nextYear=false 表示下季不在（租借），
+   opt.capAnnual 单独给规则 2 用的年薪——续约一个本季到期的球员时，
+   本季现金只多付涨薪那部分（他本来就在发薪名单上），但下季承诺是**整份**新增的。*/
 function canAfford(c, fee, annual, opt){
   opt=opt||{};
   const weeks = opt.weeks==null? remWeeks(c) : opt.weeks;
+  const capAn = opt.capAnnual==null? annual : opt.capAnnual;
   const cash  = (fee||0) + annual*weeks/52;
   const av    = avail(c);
   if(cash > av) return {ok:false, why:"cash", gap:Math.round(cash-av), weeks, cash:Math.round(cash)};
-  if(opt.nextYear!==false && annual>0){
-    const next=committedNext(c)+annual, cap=wageCap(c);
+  if(opt.nextYear!==false && capAn>0){
+    const next=committedNext(c)+capAn, cap=wageCap(c);
     if(next > cap) return {ok:false, why:"cap", gap:Math.round(next-cap), next:Math.round(next), cap, weeks};
   }
   return {ok:true, weeks};
@@ -3157,14 +3160,22 @@ function aiLoanOffersToUser(){
         && wouldStart(p,b) && (squadNeed(b).pos===p.pos || (p.pos2||[]).includes(squadNeed(b).pos) || rnd()<0.3));
     if(!pool.length) return;
     const b=pick(pool);
-    const wageShare = (u.rep-b.rep>12 && rnd()<0.5)? 0.5 : 1;
-    const fee = p.ca>b.rep*1.9 ? Math.round(p.value*0.04/1e4)*1e4 : 0;
-    if(fee>clubSpend(b)) return;
-    if(!canAfford(b, fee, p.wage*52*wageShare, {nextYear:false}).ok) return;
-    const half = windowName()==="夏窗" && rnd()<0.3;
-    WORLD.offers.push({type:"loan", pid:p.id, club:b.id, fee, wageShare, minApps:0.6, half, day:WORLD.day, until:Math.min(WORLD.day+10, windowEndDay())});
-    news(`${b.cn} 请求租借 ${p.cn}`,`${b.cn}（${LGS(b)}）希望租借 ${p.cn} ${half?"至冬窗":"至赛季末"}，承担 ${Math.round(wageShare*100)}% 工资${fee?`，另付租借费 ${money(fee)}`:""}，并承诺 60% 以上的出场。${p.wantsLoan?"球员本人正希望出去踢球。":""}请到「转会」页面处理。`,"info");
+    makeLoanOffer(b,p);
   });
+}
+/* 构造一份「AI 向玩家请求租借」的 offer。推销回复里买不起的分支也走这里，别抄第二份。*/
+function makeLoanOffer(b, p, note){
+  const u=UC();
+  const wageShare = (u.rep-b.rep>12 && rnd()<0.5)? 0.5 : 1;
+  const fee = p.ca>b.rep*1.9 ? Math.round(p.value*0.04/1e4)*1e4 : 0;
+  if(fee>clubSpend(b)) return false;
+  if(!canAfford(b, fee, p.wage*52*wageShare, {nextYear:false}).ok) return false;
+  const half = windowName()==="夏窗" && rnd()<0.3;
+  WORLD.offers.push({type:"loan", pid:p.id, club:b.id, fee, wageShare, minApps:0.6, half, day:WORLD.day, until:Math.min(WORLD.day+10, windowEndDay())});
+  news(`${b.cn} 请求租借 ${p.cn}`,
+    (note||`${b.cn}（${LGS(b)}）希望租借 ${p.cn} ${half?"至冬窗":"至赛季末"}`)
+    +`，承担 ${Math.round(wageShare*100)}% 工资${fee?`，另付租借费 ${money(fee)}`:""}，并承诺 60% 以上的出场。${p.wantsLoan?"球员本人正希望出去踢球。":""}请到「转会」页面处理。`,"info");
+  return true;
 }
 // AI 之间：买不起就租（转会窗内每日，跟在 aiTransferRound 后）
 function aiLoanRound(){
@@ -3227,6 +3238,23 @@ function perfTag(p){
 }
 
 // ---------- 外界对玩家球员的关注 ----------
+/* ===== 转会市场主动化 v38 公共件 =====
+   规范见项目目录《转会市场主动化规范.md》。玩家挂牌可以带要价，AI 的估值必须是确定性的，
+   否则推销回复和日常报价会给出两个数。 */
+function winKey(){ return WORLD.season*2 + (windowName()==="冬窗"?1:0); }
+// 玩家挂牌的要价；没挂牌或没填就是市价
+function sellPrice(p){ return (p.listed && p.askPrice>0)? p.askPrice : askingPrice(p); }
+// 折扣幅度：正 = 低于市价挂，负 = 高于市价
+function disc(p){ const a=askingPrice(p); return a>0? clamp(1 - sellPrice(p)/a, -0.5, 0.6) : 0; }
+/* AI 对某球员的估值。原来 aiOffersToUser 里用 rnd()，换成按 (球员|球会|赛季|窗口) 的 hash，
+   这样同一个窗口里推销问一次、日常报价再来一次，答案一致，问不出更高价。*/
+function aiValuation(b, p){
+  const u=UC(), ask=askingPrice(p);
+  const h=(hashStr(p.id+"|"+b.id+"|"+WORLD.season+"|"+(windowName()||""))%1000)/1000;
+  let mult = 0.9 + perfIndex(p)*0.2 + Math.max(0,b.rep-u.rep)/55 + h*0.25;
+  if(p.untouchable) mult+=0.3;
+  return Math.round(Math.min(ask*mult, clubSpend(b))/1e4)*1e4;
+}
 function interestList(){ return WORLD.interest=(WORLD.interest||[]); }
 function interestOf(pid){ return interestList().filter(it=>it.pid===pid); }
 function heatOf(p){
@@ -3237,7 +3265,7 @@ function heatOf(p){
   let heat=perf*0.65 + star*0.35 + young*0.3;
   if(p.age>=31) heat*=0.5; if(p.age>=33) heat*=0.4;
   if(p.injury>40) heat*=0.5;
-  if(p.listed) heat+=0.35;
+  if(p.listed) heat += disc(p) < -0.2 ? 0 : clamp(0.25 + disc(p)*0.6, 0, 0.6);   // 要价越低越抢手；高出市价两成以上没加成
   if(p.untouchable) heat*=0.4;
   return clamp(heat,0,1.4);
 }
@@ -3249,7 +3277,7 @@ function addInterest(p, force){
   if(!force && heat<0.2) return false;
   if(absDay()-(p.joinedAbs!=null?p.joinedAbs:-999)<120) return false;   // 新援短期内不会被挖角
   if(!force && rnd() > heat*0.45) return false;
-  const ask=askingPrice(p);
+  const ask=sellPrice(p);
   const pool=WORLD.clubs.filter(c=>c.id!==u.id && !cur.some(e=>e.club===c.id)
     && c.squad.length<29
     && p.ca < c.rep*2.05+42 && p.ca > c.rep*1.45
@@ -3283,23 +3311,22 @@ function aiOffersToUser(){
     if(WORLD.offers.some(o=>o.pid===p.id&&o.club===b.id)) return;
     if(b.squad.length>=29 || WORLD.offers.length>=10) return;
     const heat=heatOf(p);
-    let pr = 0.05 + heat*0.09; if(dl) pr*=2.5; if(p.listed) pr+=0.06;
+    let pr = 0.05 + heat*0.09; if(dl) pr*=2.5;
+    if(p.listed) pr += 0.06 + Math.max(0,disc(p))*0.15;        // 挂得越便宜来得越勤
     if(rnd()>pr) return;
-    const ask=askingPrice(p), spend=clubSpend(b);
-    if(spend < ask*0.8) return;
-    // 报价倍数：表现越好、买家越大 → 溢价越高；挂牌略压价；非卖品要出天价
-    let mult = 0.9 + perfIndex(p)*0.2 + Math.max(0,b.rep-u.rep)/55 + rnd()*0.25;   // 表现已在身价里，这里只留追捧溢价
-    if(p.listed) mult-=0.12;
-    if(p.untouchable) mult+=0.3;
-    let fee=Math.round(Math.min(ask*mult, spend)/1e4)*1e4;
+    const ask=askingPrice(p), want=sellPrice(p), spend=clubSpend(b);
+    if(spend < want*0.8) return;
+    const v=aiValuation(b,p);
+    let fee=v, atAsk=false;
+    if(p.listed && p.askPrice>0 && p.askPrice<=v){ fee=p.askPrice; atAsk=true; }   // 到要价就照要价出
     const top=WORLD.offers.filter(o=>o.pid===p.id).sort((a,b)=>b.fee-a.fee)[0];
-    if(top){ fee=Math.max(fee, Math.round(top.fee*(1.06+rnd()*0.12)/1e4)*1e4); if(fee>spend || fee>ask*2.2) return; }
-    if(fee < ask*0.75) return;
+    if(top){ fee=Math.max(fee, Math.round(top.fee*(1.06+rnd()*0.12)/1e4)*1e4); atAsk=fee>=want; if(fee>spend || fee>ask*2.2) return; }
+    if(fee < want*0.75) return;                                 // 差太远他们自己知道，不来
     fee=Math.min(fee, Math.round(ask*2.2/1e4)*1e4);
     const wage=wageDemand(p,b);
     if(!aiAffordWage(b, wage*52, fee)) return;
     const max=Math.round(Math.min(spend, fee*(1.12+heat*0.35))/1e4)*1e4;
-    WORLD.offers.push({pid:p.id, club:b.id, fee, max, wage, day:WORLD.day, until:Math.min(WORLD.day+14, windowEndDay())});
+    WORLD.offers.push({pid:p.id, club:b.id, fee, max, wage, atAsk, day:WORLD.day, until:Math.min(WORLD.day+14, windowEndDay())});
     const eager = b.rep>u.rep+8;
     news(top?`${b.cn} 加入争夺 ${p.cn}`:`${b.cn} 报价 ${p.cn}`,
       `${b.cn} 为 ${p.cn} 提交了 ${money(fee)} 的正式报价${top?`，高于 ${C(top.club).cn} 此前的 ${money(top.fee)}`:""}${fee>=ask*1.3?"，远超市场估价":""}。${eager?"据悉球员本人对加盟这家豪门很感兴趣。":""}请到「转会」页面处理，${dl?"转会窗即将关闭":"14 天内有效"}。`,"warn");
@@ -3464,6 +3491,7 @@ function marketDaily(){
   aiLoanRound();
   aiOffersToUser();
   aiLoanOffersToUser();
+  pitchReplies();
   // 没被盯上也可能突然来人（挂牌球员更常见）
   if(rnd()<0.04 && u.squad.length>17){
     const all=u.squad.map(i=>P(i));
@@ -3478,6 +3506,15 @@ function marketDaily(){
     news(`${windowName()}截止日临近`,`转会窗将在 3 天后关闭，各俱乐部正在加紧最后的谈判${n?`。你手上还有 ${n} 份未处理的报价，窗口关闭后将自动失效`:""}。`,"warn");
   }
   if(WORLD.day===endD){
+    // 挂了一整窗没人问的，给一条提示，顺便说清可能的原因
+    u.squad.map(i=>P(i)).filter(p=>p.listed && !p.loan).forEach(p=>{
+      if((WORLD.offers||[]).some(o=>o.pid===p.id)) return;
+      const ask=askingPrice(p), want=sellPrice(p);
+      const n=p.listedAbs!=null? Math.max(1, absDay()-p.listedAbs) : windowEndDay()-1;
+      news(`${p.cn} 没有收到报价`,
+        `${p.cn} 挂牌 ${n} 天没有收到任何报价。市价 ${money(ask)}，你的要价 ${money(want)}。`
+        + (want>ask? "要价高于市价可能是原因。" : "这个位置近期没有球队缺人。"),"warn");
+    });
     u.squad.map(i=>P(i)).filter(p=>p.wantsLoan && !p.loan).forEach(p=>{
       p.unrest=(p.unrest||0)+1; p.morale=clamp(p.morale-8,5,100);
       news(`${p.cn} 对没被外租感到失望`,`转会窗关闭了，${p.cn} 还是没能出去踢球。${p.unrest>=2?"他的经纪人放话：下个窗口要么走人，要么公开要求转会。":"他的士气受到影响。"}`,"warn");
@@ -3595,7 +3632,8 @@ function setShirtNumber(pid){
 }
 function toggleUntouchable(pid){
   const p=P(pid); if(p.loan){ toast("租借球员的归属权在母队","bad"); return; }
-  p.untouchable=!p.untouchable; if(p.untouchable) p.listed=false;
+  p.untouchable=!p.untouchable;
+  if(p.untouchable){ p.listed=false; p.askPrice=null; p.autoSell=false; p.listedAbs=null; }
   toast(p.untouchable?`${p.cn} 已设为非卖品，大多数俱乐部会知难而退`:`已取消 ${p.cn} 的非卖品标记`);
   closeModal(); render();
 }
@@ -3925,8 +3963,11 @@ function aiRenewDecide(c, p){
   // 占不下就是真的「续不起」——这才是有据可查的少数情况。
   const want=Math.max(p.wage, calcWage(p,c.rep));
   const extra=(want-p.wage)*52;
-  if(extra<=0) return true;                 // 原薪续约不增加薪资总额，超支的队也该留得住人
-  return aiAffordWage(c, extra, 0);
+  /* 同 doRenew：提前续约（contract > season）算增量，到期续约（contract <= season）算全额。
+     前者原薪免检没问题，后者免检就等于每季把到期的人白送回下季承诺。*/
+  const capAn=(p.contract>WORLD.season? extra : want*52);
+  if(extra<=0 && capAn<=0) return true;
+  return canAfford(c, 0, extra, {capAnnual:capAn}).ok;
 }
 // 提前续约：合同只剩 1 年的先谈掉，别让所有合同都跑到零再赌一次闸门
 function aiExtendContracts(){
@@ -4235,8 +4276,29 @@ function processDayEnd(day){
   const dt=dateOf(day);
   if(dt.getDay()===1) weeklyTick();
   if(dt.getMonth()===2 && dt.getDate()===20 && !WORLD.youthDone){ WORLD.youthDone=true; youthIntake(); }
+  autoSellRound();                  // 到价自动成交（留一天给竞价，所以放在报价过期之前）
   // 报价过期（到期前始终可处理，不会被新报价顶掉）
   if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>((o.until!=null?o.until:o.day+7))>WORLD.day && inTransferWindow());
+}
+
+/* 到价自动成交。不当场成交——留一天给别家竞价（竞价抬价 6~18% 仍有机会发生），
+   所以只看昨天或更早收到的报价，同一球员取最高的那份。玩家当天手动处理过的自然扫不到。*/
+function autoSellRound(){
+  if(!inTransferWindow()) return;
+  const u=UC(), offs=WORLD.offers||[];
+  const ready=offs.filter(o=>o.type!=="loan" && o.atAsk && o.day<WORLD.day
+     && P(o.pid) && P(o.pid).autoSell && P(o.pid).clubId===u.id && !P(o.pid).loan);
+  const byP={};
+  ready.forEach(o=>{ if(!byP[o.pid] || o.fee>byP[o.pid].fee) byP[o.pid]=o; });
+  Object.keys(byP).forEach(pid=>{
+    const of=byP[pid], p=P(of.pid);
+    const want=sellPrice(p);
+    if(!(of.fee >= want)) return;
+    const i=WORLD.offers.indexOf(of); if(i<0) return;
+    const b=C(of.club), fee=of.fee;
+    acceptOffer(i);
+    news(`按挂牌条件自动成交`,`${p.cn} 以 ${money(fee)} 转会 ${b.cn}——达到了你设定的要价 ${money(want)}。`,"good");
+  });
 }
 
 // 主「继续」入口，返回状态
@@ -4641,7 +4703,8 @@ function showPlayer(pid){
         <button onclick="renewContract(${pid})">续约</button>
         ${sl?`<button onclick="toggleShortlist(${pid})">取消关注</button>`:""}
         <button ${winAttr} onclick="loanOutDialog(${pid})">外租</button>
-        <button onclick="listPlayer(${pid})">${p.listed?"取消挂牌":"挂牌出售"}</button>
+        <button ${winAttr||(p.untouchable?"disabled title='非卖品不能推销'":"")} onclick="pitchDialog(${pid})">推销</button>
+        <button onclick="listPlayer(${pid})">${p.listed?`挂牌中 ${money(sellPrice(p))}`:"挂牌出售"}</button>
         <button onclick="toggleUntouchable(${pid})">${p.untouchable?"取消非卖品":"设为非卖品"}</button>
         <button onclick="releasePlayer(${pid})" style="color:var(--bad)">解约</button>
         <button onclick="closeModal()">关闭</button>`;
@@ -4668,6 +4731,127 @@ function showPlayer(pid){
   }
   openModal(esc(p.cn)+' <span class="hint" style="font-weight:400">'+(club?esc(club.cn):"自由球员")+'</span>', h, ft);
 }
+/* ---------- 主动推销 ---------- */
+// 这家俱乐部有多需要他：缺这个位置 2，能首发 1，都不是 0
+function pitchNeed(c, p){
+  const nd=squadNeed(c).pos;
+  if(nd===p.pos || (p.pos2||[]).includes(nd)) return 2;
+  return wouldStart(p,c)? 1 : 0;
+}
+function pitchReset(p){
+  if(p.pitchWin!==winKey()){ p.pitchWin=winKey(); p.pitchN=0; p.pitched=[]; p.pitchFelt=0; }
+}
+function pitchCands(p){
+  const u=UC(), price=sellPrice(p);
+  pitchReset(p);
+  return WORLD.clubs.filter(c=>c.id!==u.id && c.squad.length<29
+      && p.ca > c.rep*1.45 && p.ca < c.rep*2.05+42
+      && clubSpend(c) >= price*0.6
+      && !(p.pitched||[]).includes(c.id))
+    .map(c=>{ const v=aiValuation(c,p), need=pitchNeed(c,p), start=wouldStart(p,c);
+      const lvl = (v>=price*0.9 && need>=1)? 2 : (v>=price*0.65 && (need>=1||start))? 1 : 0;
+      return {c, v, need, start, lvl}; })
+    .sort((a,b)=>(b.lvl-a.lvl)||(b.need-a.need)||(b.c.rep-a.c.rep))
+    .slice(0,14);
+}
+function pitchDialog(pid){
+  const p=P(pid), u=UC();
+  if(!inTransferWindow()){ toast("只能在转会窗内推销","bad"); return; }
+  if(p.loan){ toast("租借中的球员归属权在母队","bad"); return; }
+  if(p.untouchable){ toast(`${p.cn} 是非卖品`,"bad"); return; }
+  pitchReset(p);
+  const left=3-(p.pitchN||0);
+  const cands=pitchCands(p), price=sellPrice(p);
+  if(!cands.length){ toast("目前没有球队适合推销他","bad"); return; }
+  const lvlTag=x=>x.lvl===2?'<span class="tag t-ok">兴趣 高</span>':x.lvl===1?'<span class="tag t-i">兴趣 中</span>':'<span class="tag t-n">兴趣 低</span>';
+  const rows=cands.map(x=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #1d242e;flex-wrap:wrap;cursor:pointer">
+      <input type="checkbox" class="pitch-cb" value="${x.c.id}" ${left<=0?"disabled":""}>
+      ${crestHTML(x.c)}<b>${esc(x.c.cn)}</b><span class="tag t-n">${LGS(x.c)}</span>
+      ${x.need>=2?'<span class="tag t-w">缺该位置</span>':''}${x.start?'<span class="tag t-i">能首发</span>':''}
+      ${clubSpend(x.c)>=price?'<span class="tag t-ok">可负担</span>':''}
+      <span style="flex:1"></span>${lvlTag(x)}</label>`).join("");
+  const willMind = !(p.listed || (p.unrest||0)>=1 || p.wantsLoan);
+  openModal("推销 "+esc(p.cn),
+    `<div class="hint">${POS_CN[p.pos]} · ${p.age} 岁 · 能力 ${ovr(p)} · 周薪 ${money(p.wage)} · 你的要价 <b style="color:var(--acc)">${money(price)}</b>${p.listed?"":"（未挂牌，按市价）"}</div>
+     <div class="hint" style="margin-top:6px">${left>0?`本窗还可推销 <b>${left}</b> 家（每名球员每窗最多 3 家，同一家只能推一次）。`:"<b>本窗推销次数已用完。</b>"}对方会在 1~3 天内答复。</div>
+     <div class="scroll" style="max-height:280px;margin-top:8px">${rows}</div>
+     <div class="hint" style="margin-top:10px">成交后可用资金 +${money(price)} + 剩余周薪 ${money(p.wage*remWeeks(u))}，下季工资承诺 −${money(p.wage*52)}。</div>
+     <div class="hint" style="margin-top:6px">球员对被兜售的反应：${willMind?'<span style="color:var(--warn)">他会不高兴（士气下降）</span>':"他本来就想走，不会介意"}。</div>`,
+    `<button class="pri" ${left<=0?"disabled":""} onclick="sendPitch(${pid})">发出推荐</button><button onclick="closeModal()">取消</button>`);
+  const cbs=document.querySelectorAll(".pitch-cb");
+  cbs.forEach(cb=>cb.onchange=()=>{
+    const n=[...document.querySelectorAll(".pitch-cb")].filter(x=>x.checked).length;
+    if(n>left){ cb.checked=false; toast(`本窗最多还能推 ${left} 家`,"bad"); }
+  });
+}
+function sendPitch(pid){
+  const p=P(pid), u=UC();
+  pitchReset(p);
+  const left=3-(p.pitchN||0);
+  const ids=[...document.querySelectorAll(".pitch-cb")].filter(x=>x.checked).map(x=>+x.value).slice(0,Math.max(0,left));
+  if(!ids.length){ toast("先选至少一家俱乐部","bad"); return; }
+  const price=sellPrice(p), endD=windowEndDay();
+  WORLD.pitches=WORLD.pitches||[];
+  ids.forEach(cid=>{
+    WORLD.pitches.push({pid, club:cid, price, day:WORLD.day, due:Math.min(WORLD.day+ri(1,3), endD)});
+    (p.pitched=p.pitched||[]).push(cid); p.pitchN=(p.pitchN||0)+1;
+  });
+  // 球员的反应：本来就想走的不介意；主力被兜售还要多一层不被信任
+  if(!(p.listed || (p.unrest||0)>=1 || p.wantsLoan) && !p.pitchFelt){
+    p.pitchFelt=1; p.morale=clamp(p.morale-8,5,100);
+    news(`${p.cn} 知道了俱乐部在兜售他`,`${p.cn} 得知俱乐部在向其他球队兜售他，训练时情绪明显低落。`,"warn");
+    if(u.lineup.includes(pid)) p.unrest=Math.min(2,(p.unrest||0)+1);
+  }
+  news(`已向 ${ids.map(i=>C(i).short).join("、")} 推荐 ${p.cn}`,
+    `${u.cn} 主动向 ${ids.map(i=>esc(C(i).cn)).join("、")} 推荐了 ${p.cn}，要价 ${money(price)}。对方会在几天内答复。`,"info");
+  toast(`已推荐给 ${ids.length} 家俱乐部`); closeModal(); render();
+}
+/* 推销回复。每日在 marketDaily 里跑。*/
+function pitchReplies(){
+  const u=UC(); WORLD.pitches=WORLD.pitches||[];
+  const keep=[], done=[];
+  WORLD.pitches.forEach(pt=>{
+    const p=P(pt.pid), b=WORLD.clubs[pt.club];
+    if(!p || !b || p.clubId!==u.id || p.loan || !inTransferWindow()) return;   // 人已经不在了，条目直接丢
+    if(pt.due>WORLD.day){ keep.push(pt); return; }
+    const price=pt.price, v=aiValuation(b,p), need=pitchNeed(b,p), start=wouldStart(p,b), w=wageDemand(p,b);
+    const already=WORLD.offers.some(o=>o.pid===p.id&&o.club===b.id);
+    const fee1=Math.min(price, v);
+    if(!already && v>=price*0.9 && need>=1 && canAfford(b, fee1, w*52).ok){
+      const fee=v>=price? price : v;
+      WORLD.offers.push({pid:p.id, club:b.id, fee, max:Math.round(Math.min(clubSpend(b), fee*1.18)/1e4)*1e4,
+        wage:w, atAsk:fee>=price, pitched:true, day:WORLD.day, until:Math.min(WORLD.day+14, windowEndDay())});
+      news(`${b.cn} 接受了推荐`,`${b.cn} 接受了你对 ${p.cn} 的推荐，报价 ${money(fee)}。请到「转会」页面处理。`,"good");
+    } else if(!already && v>=price*0.65 && (need>=1||start) && canAfford(b, v, w*52).ok){
+      WORLD.offers.push({pid:p.id, club:b.id, fee:v, max:Math.round(Math.min(clubSpend(b), v*1.15)/1e4)*1e4,
+        wage:w, atAsk:false, pitched:true, day:WORLD.day, until:Math.min(WORLD.day+14, windowEndDay())});
+      news(`${b.cn} 有兴趣`,`${b.cn} 对 ${p.cn} 有兴趣，但只愿出 ${money(v)}（你的要价 ${money(price)}）。`,"info");
+    } else if(start && b.squad.length<28 && p.age<=27 && !already
+              && makeLoanOffer(b, p, `${b.cn} 买不起 ${p.cn}，但提出租借`)){
+      // makeLoanOffer 里已经发了 news
+    } else {
+      news(`${b.cn} 回复`,`${b.cn} 回复：目前不需要 ${p.cn} 这样的球员。`,"info");
+      const it=interestList().find(x=>x.pid===p.id&&x.club===b.id); if(it) it.heat*=0.7;
+      if(p.pitchRejWin!==winKey()){ p.pitchRejWin=winKey(); p.pitchRej=0; }
+      p.pitchRej=(p.pitchRej||0)+1;
+    }
+    done.push(p);
+  });
+  WORLD.pitches=keep;
+  /* 本窗推的每一家都拒了 → 再掉一点。等这个球员没有待回复的条目了再判，
+     否则前两家先拒、第三家还没回就会提前触发。*/
+  [...new Set(done)].forEach(p=>{
+    if(keep.some(q=>q.pid===p.id)) return;                 // 还有没回的
+    if(p.pitchRejWin!==winKey()) return;
+    if((p.pitchRej||0) < (p.pitchN||0)) return;            // 有人接了
+    if(p.pitchDown===winKey()) return;                     // 本窗已经掉过
+    p.pitchDown=winKey();
+    if(p.listed || (p.unrest||0)>=1 || p.wantsLoan) return;
+    p.morale=clamp(p.morale-4,5,100);
+    news(`${p.cn} 无人问津`,`${p.cn} 被推销一圈无人问津，更没心思了。`,"warn");
+  });
+}
+
 /* ---------- 外租弹窗 ---------- */
 function loanFeeFor(p,b){ return p.ca>b.rep*1.9 ? Math.round(p.value*0.04/1e4)*1e4 : 0; }   // 玩家租出时对方付的租借费
 function loanOutDialog(pid){
@@ -5012,6 +5196,7 @@ function vTransfer(v){
   const c=UC();
   v.appendChild(el("div","",`<h1>转会市场</h1><div class="sub" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px">
     <span>可用资金 <b style="color:${avail(c)>=0?"var(--acc)":"var(--bad)"}">${money(avail(c))}</b></span>
+    ${(()=>{const n=c.squad.map(i=>P(i)).filter(p=>p&&p.listed&&p.autoSell).length; return n?`<span class="tag t-ok">${n} 名球员设置了到价自动成交</span>`:"";})()}
     <span>下季工资承诺 <b style="color:${committedNext(c)>wageCap(c)?"var(--bad)":"var(--ok,#00d47e)"}">${money(committedNext(c))}</b> <span class="hint">/ 上限 ${money(wageCap(c))}</span></span>
     ${inTransferWindow()?`<span class="tag t-ok">${windowName()}开启中 · 还剩 ${windowDaysLeft()} 天</span>${isDeadline()?' <span class="tag t-w">截止日临近</span>':''}`:`<span class="tag t-w">转会窗关闭</span> <span class="hint">下一窗口约 ${nextWindowIn()} 天后开启；自由球员不受转会窗限制，随时可签</span>`}</div>`));
 
@@ -5039,6 +5224,7 @@ function vTransfer(v){
       d.innerHTML=`${crestHTML(b)}<b>${esc(b.cn)}</b><span class="tag t-n">${LGS(b)}</span>
         <span class="hint">报价</span><b style="cursor:pointer" onclick="showPlayer(${p.id})">${esc(p.cn)}</b>
         <span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${perfTag(p)}${att}${of.final?'<span class="tag t-w">最终报价</span>':''}
+        ${of.atAsk?'<span class="tag t-ok">已到要价</span>':(p.listed?`<span class="tag t-w">低于要价 ${money(Math.max(0,sellPrice(p)-of.fee))}</span>`:'')}${of.pitched?'<span class="tag t-i">推销所得</span>':''}
         <span style="flex:1"></span>
         <b style="color:var(--acc);font-size:14px">${money(of.fee)}</b>
         <span class="hint">身价 ${money(p.value)} · ${left>0?`${left} 天后到期`:"今天到期"}</span>`;
@@ -5062,13 +5248,14 @@ function vTransfer(v){
     const h=heatOf(p);
     const d=el("div"); d.style.cssText="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #1d242e;flex-wrap:wrap";
     d.innerHTML=`<b style="cursor:pointer;min-width:64px;padding:5px 0" onclick="showPlayer(${p.id})">${esc(p.cn)}</b><span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${perfTag(p)}
-      ${p.listed?'<span class="tag t-w">已挂牌</span>':''}${p.untouchable?'<span class="tag t-i">非卖品</span>':''}${(p.unrest||0)>=2?'<span class="tag t-b">要求转会</span>':''}
+      ${p.listed?`<span class="tag t-w">挂牌 ${money(sellPrice(p))}</span>${p.autoSell?'<span class="tag t-ok">自动成交</span>':''}`:''}${p.untouchable?'<span class="tag t-i">非卖品</span>':''}${(p.unrest||0)>=2?'<span class="tag t-b">要求转会</span>':''}
       <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
         <span class="hint">关注度</span><span style="width:70px;display:inline-block">${barHTML(Math.min(100,h*100),100,h>=0.6?"#ff7a45":"#4a9eff")}</span>
         <span class="hint">${suit.length?"追求者：":"暂无明确追求者"}</span>${suit.map(b=>`<span>${crestHTML(b)}${esc(b.short)}${b.rep>c.rep+8?' <span class="tag t-w">豪门</span>':''}</span>`).join("")}</span>
       <span style="flex:1"></span>`;
     const acts=el("div"); acts.style.cssText="display:flex;gap:6px;margin-left:auto";
-    const l=el("button","sm",p.listed?"取消挂牌":"挂牌"); l.onclick=()=>listPlayer(p.id);
+    const l=el("button","sm",p.listed?"改要价":"挂牌"); l.onclick=()=>listPlayer(p.id);
+    if(p.listed){ const ul=el("button","sm","取消挂牌"); ul.onclick=()=>unlistPlayer(p.id); acts.appendChild(ul); }
     const un=el("button","sm",p.untouchable?"取消非卖品":"设为非卖品"); un.onclick=()=>toggleUntouchable(p.id);
     acts.appendChild(l); acts.appendChild(un);
     if(p.listed){ const rl=el("button","sm",`解约 ${money(releaseFee(p))}`); rl.style.color="var(--bad)"; rl.onclick=()=>releasePlayer(p.id); acts.appendChild(rl); }
@@ -5194,14 +5381,15 @@ function makeBid(pid){
   openModal((isFA?"签下 ":"为 ")+esc(p.cn)+(isFA?"":" 报价"),
     `${isFA
        ? `<div class="hint">他是自由球员，<b style="color:var(--ok,#00d47e)">无需转会费</b>，只谈合同。他要求周薪约 <b>${money(wg)}</b>。${inTransferWindow()?"":"<br>自由球员不受转会窗限制，随时可签。"}</div>`
-       : `<div class="hint">对方要价约 <b style="color:var(--acc)">${money(ask)}</b>，球员周薪要求约 <b>${money(wg)}</b>${p.listed?'　<span class="tag t-w">挂牌折价</span>':''}</div>`}
+       : `<div class="hint">对方要价约 <b style="color:var(--acc)">${money(ask)}</b>，球员周薪要求约 <b>${money(wg)}</b>${p.listed?'　<span class="tag t-w">他被挂牌，卖方有出售意愿</span>':''}<br>可以尝试压价，对方最多还一次价；再谈不拢本窗就不谈了。</div>`}
      ${(!isFA&&(perfIndex(p)>=0.35||(p.clubId>=0&&p.ca>C(p.clubId).rep*1.9)))?'<div class="hint" style="margin-top:6px;color:var(--warn)">该球员是市场热门，报价若仅略高于要价，可能被其他俱乐部截胡；高出要价 8% 以上更稳妥。</div>':''}
      ${isFA? '<input id="bid-fee" type="hidden" value="0">'
            : `<div style="margin-top:12px"><label>转会费（£）</label><input id="bid-fee" type="number" value="${ask}" style="width:180px"></div>`}
      <div style="margin-top:8px"><label>周薪（£）</label><input id="bid-wage" type="number" value="${wg}" style="width:180px"></div>
      <div style="margin-top:8px"><label>合同年限</label><select id="bid-yr" onchange="updBidCost()"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
+     <div class="hint" id="bid-nego" style="margin-top:10px"></div>
      <div class="hint" id="bid-cost" style="margin-top:12px"></div>`,
-    `<button class="pri" onclick="submitBid(${pid})">${isFA?"签下":"提交报价"}</button><button onclick="closeModal()">取消</button>`);
+    `<button class="pri" id="bid-go" onclick="submitBid(${pid})">${isFA?"签下":"提交报价"}</button><button onclick="closeModal()">取消</button>`);
   const f=$("#bid-fee"), w=$("#bid-wage");
   if(f) f.oninput=updBidCost;
   if(w) w.oninput=updBidCost;
@@ -5219,6 +5407,17 @@ function updBidCost(){
     +`下季工资承诺将从 ${money(cn)} 升到 <b style="color:${cn+wg*52>cap?"var(--bad)":""}">${money(cn+wg*52)}</b> / ${inCapTransition(c)?"本季上限（过渡期）":"上限"} ${money(cap)}。`
     +(r.ok?"":`<br><span style="color:var(--bad)">${r.why==="cash"?"可用资金不足":(inCapTransition(c)?"超出本季工资上限（过渡期）":"超出董事会工资上限")}，差 ${money(r.gap)}${r.why==="cap"?"/年":""}。</span>`);
 }
+/* 卖方底线。相对 askingPrice（它已经含了合同年限折扣），越是「他们本来就想卖」的人越能砍。
+   底线不显示给玩家，玩家最多试两次。*/
+function sellerFloor(seller, p){
+  let m;
+  if(p.listed) m=0.78;
+  else if(p.age>=30 || p.ca<seller.rep*1.5 || p.morale<40) m=0.85;   // 与 aiListSurplus 的冗员标准一致
+  else { const same=seller.squad.map(i=>P(i)).filter(q=>q.pos===p.pos).sort((a,b)=>b.ca-a.ca);
+         m = same[0]===p ? 1.0 : 0.92; }
+  if(isDeadline()) m-=0.05;                                          // 截止日捡漏
+  return Math.round(askingPrice(p)*m/1e4)*1e4;
+}
 function submitBid(pid){
   const p=P(pid), c=UC();
   const isFA = p.clubId<0;
@@ -5230,7 +5429,27 @@ function submitBid(pid){
   if(c.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
   const seller=p.clubId>=0?C(p.clubId):null;
   if(seller && !canSell(seller,p)){ toast(`${seller.cn} 拒绝出售——该位置人手不足`,"bad"); closeModal(); return; }
-  if(!isFA && fee < ask*0.93){ toast(`${seller?seller.cn:"球员"} 拒绝了报价，要价 ${money(ask)}`,"bad"); closeModal(); return; }
+  if(!isFA && seller && fee < ask){
+    const floor=sellerFloor(seller,p);
+    if(fee < floor){
+      if(p.negoLock===winKey()){ toast(`${seller.cn} 本窗不再和你压价谈 ${p.cn}——只接受要价 ${money(ask)}`,"bad"); closeModal(); return; }
+      const first = !p.nego || p.nego.win!==winKey() || !p.nego.round;
+      if(first){
+        const counter=Math.max(floor, Math.round((fee+ask)/2/1e4)*1e4);
+        p.nego={win:winKey(), round:1, counter};
+        const fi=$("#bid-fee"); if(fi) fi.value=counter;
+        const box=$("#bid-nego");
+        if(box) box.innerHTML=`<span style="color:var(--warn)">${esc(seller.cn)} 还价 <b>${money(counter)}</b>（要价 ${money(ask)}）。你可以接受或再出一次价，再谈不拢对方就会退出。</span>`;
+        const btn=$("#bid-go"); if(btn) btn.textContent="按还价成交 / 再出一次";
+        if(typeof updBidCost==="function") updBidCost();
+        toast(`${seller.cn} 还价 ${money(counter)}`,"warn");
+        return;
+      }
+      p.negoLock=winKey(); p.nego=null;
+      toast(`${seller.cn} 认为没得谈，退出了谈判。本窗不再接受你对 ${p.cn} 的压价，要价 ${money(ask)} 照旧有效。`,"bad");
+      closeModal(); return;
+    }
+  }
   if(wg < need*0.92){ toast(`${p.cn} 认为薪资不足，要求 ${money(need)}/周`,"bad"); closeModal(); return; }
   // 球员意愿：声望差
   if(seller && seller.rep > c.rep+14 && rnd()<0.6){ toast(`${p.cn} 不愿加盟——认为这是职业生涯的倒退`,"bad"); closeModal(); return; }
@@ -5280,16 +5499,80 @@ function doRenew(pid,need){
   if((p.unrest||0)>=2){ toast(`${p.cn} 拒绝续约——他已要求转会`,"bad"); return; }
   if(w<need*0.95){ toast(`${p.cn} 拒绝了这份合同`,"bad"); return; }
   const shareK = p.loan? (1-p.loan.wageShare) : 1;
-  const inc=(w-p.wage)*52*shareK;                 // 只算涨薪增量：他现在的工资已经在两个 Σ 里
-  if(inc>0){ const r=canAfford(c, 0, inc); if(!r.ok){ toast(affordMsg(c, r, 0, inc),"bad"); return; } }
+  const inc=(w-p.wage)*52*shareK;                 // 本季现金只多付涨薪这部分
+  /* 合同还没到期的人已经在 committedNext 里，续约只新增涨薪；本季到期的人**不在**里面，
+     续约他等于给下季新增一整份年薪——按增量算会让每季到期的人免检塞回下季承诺。*/
+  const capAn=(p.contract>WORLD.season? inc : w*52*shareK);
+  if(inc>0 || capAn>0){
+    const r=canAfford(c, 0, inc, {capAnnual:capAn});
+    if(!r.ok){ toast(affordMsg(c, r, 0, inc),"bad"); return; }
+  }
   p.wage=w; p.contract=WORLD.season+y; p.morale=clamp(p.morale+10,5,100); p.value=calcValue(p);
   toast(`${p.cn} 已续约至 ${p.contract} 年`); closeModal(); render();
 }
+/* 挂牌弹窗。要价是玩家唯一能主动定价的地方：挂得越便宜，AI 的关注度和报价概率越高，
+   到价的报价会照要价出（不再砍）。取消挂牌 / 改要价都会清掉「到价自动成交」。*/
 function listPlayer(pid){
-  const p=P(pid); if(p.loan){ toast("租借球员的归属权在母队","bad"); return; }
-  p.listed=!p.listed; if(p.listed) p.untouchable=false;
-  toast(p.listed?`${p.cn} 已挂牌，其他俱乐部会更积极报价`:`已取消 ${p.cn} 的挂牌`);
+  const p=P(pid), u=UC();
+  if(p.loan){ toast("租借球员的归属权在母队","bad"); return; }
+  const ask=askingPrice(p), cur=p.listed? (p.askPrice||ask) : ask;
+  const yrs=Math.max(0, p.contract-WORLD.season);
+  openModal((p.listed?"修改要价 ":"挂牌出售 ")+esc(p.cn),
+    `<div class="hint">${POS_CN[p.pos]} · ${p.age} 岁 · 能力 ${ovr(p)} · 本季 ${p.apps} 场 · 周薪 ${money(p.wage)} · 合同还剩 ${yrs} 年</div>
+     <table style="font-size:13px;margin-top:8px;width:100%">
+       <tr><td class="hint" style="width:82px">市场估价</td><td><b style="color:var(--acc)">${money(ask)}</b><span class="hint"> · 身价 ${money(p.value)}</span></td></tr>
+       <tr><td class="hint">外界关注度</td><td>${Math.round(Math.min(100,heatOf(p)*100))}%${interestOf(pid).length?`<span class="hint"> · 追求者 ${interestOf(pid).map(it=>esc(C(it.club).short)).join("、")}</span>`:""}</td></tr>
+     </table>
+     <div style="margin-top:12px"><label>要价（£）</label><input id="ls-price" type="number" value="${cur}" style="width:180px"></div>
+     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+       <button class="sm" onclick="setAsk(${ask})">市价</button>
+       <button class="sm" onclick="setAsk(${Math.round(ask*0.85/1000)*1000})">−15%</button>
+       <button class="sm" onclick="setAsk(${Math.round(ask*0.70/1000)*1000})">−30%</button>
+       <button class="sm" onclick="setAsk(${Math.round(ask*0.50/1000)*1000})">半价</button>
+     </div>
+     <div class="hint" id="ls-hint" style="margin-top:10px"></div>
+     <div style="margin-top:10px"><label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+       <input type="checkbox" id="ls-auto" ${p.autoSell?"checked":""}> 到价自动成交</label>
+       <div class="hint">收到不低于要价的报价后，留一天给其他球队竞价，次日自动接受最高的那份。</div></div>
+     <div class="hint" id="ls-fin" style="margin-top:10px"></div>`,
+    `<button class="pri" onclick="submitList(${pid})">${p.listed?"保存":"挂牌"}</button>`
+    +(p.listed?`<button onclick="unlistPlayer(${pid})">取消挂牌</button>`:"")
+    +`<button onclick="closeModal()">取消</button>`);
+  LS_PID=pid;
+  const inp=$("#ls-price"); if(inp) inp.oninput=()=>updListHint(pid);
+  updListHint(pid);
+}
+let LS_PID=null;                                  // 挂牌弹窗当前的球员，快捷按钮要用
+function setAsk(v){ const i=$("#ls-price"); if(i){ i.value=v; updListHint(); } }
+function updListHint(pid){
+  const box=$("#ls-hint"), fin=$("#ls-fin"); if(!box) return;
+  const u=UC(), pr=Math.max(0, +(($("#ls-price")||{}).value||0));
+  const p = P(pid!=null? pid : LS_PID);
+  if(!p) return;
+  const ask=askingPrice(p);
+  const d=ask>0? clamp(1-pr/ask,-0.5,0.6) : 0;
+  const base=heatOf({...p, listed:false});
+  const add = d < -0.2 ? 0 : clamp(0.25 + d*0.6, 0, 0.6);
+  const m=Math.round(Math.min(100,(base+add)*100));
+  box.innerHTML=`要价 ${money(pr)}（市价的 ${ask?Math.round(pr/ask*100):0}%）· 预计关注度 → <b>${m}%</b>`
+    + (d<-0.2? `　<span style="color:var(--warn)">高于市价两成以上，基本不会有人问</span>` : "");
+  if(fin) fin.innerHTML=`成交后可用资金 +${money(pr)} + 剩余周薪 ${money(p.wage*remWeeks(u))}，下季工资承诺 −${money(p.wage*52)}。`;
+}
+function submitList(pid){
+  const p=P(pid), u=UC();
+  const pr=Math.max(5000, Math.round((+(($("#ls-price")||{}).value||0))/1000)*1000);
+  const auto=!!($("#ls-auto")&&$("#ls-auto").checked);
+  const first=!p.listed;
+  p.listed=true; p.untouchable=false;
+  p.askPrice=pr; p.autoSell=auto;
+  if(first) p.listedAbs=absDay();
+  toast(first? `${p.cn} 已挂牌，要价 ${money(pr)}` : `${p.cn} 的要价改为 ${money(pr)}`);
   closeModal(); render();
+}
+function unlistPlayer(pid){
+  const p=P(pid);
+  p.listed=false; p.askPrice=null; p.autoSell=false; p.listedAbs=null;
+  toast(`已取消 ${p.cn} 的挂牌`); closeModal(); render();
 }
 
 /* ================= 球探 ================= */
