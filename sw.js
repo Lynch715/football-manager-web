@@ -2,7 +2,7 @@
    策略：网络优先 + 超时回落。联网正常时拿最新版本；网络慢或半死不活（挂 VPN、弱信号）时
    最多等 NET_TIMEOUT 就直接吃缓存开局，网络请求继续在后台跑完并更新缓存，下次打开就是新版。
    以前是纯网络优先、不设超时：fetch 既不成功也不失败时会一直转，主屏图标点开是白屏转好几分钟。*/
-const VERSION = "fmweb-v38";
+const VERSION = "fmweb-v39";
 const NET_TIMEOUT = 2500;   // ms
 /* 存档桶：游戏把存档也放在 Cache Storage 里做冗余，清理资源缓存时绝不能连它一起删 */
 const SAVE_CACHE = "fmweb-saves";
