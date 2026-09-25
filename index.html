@@ -6974,7 +6974,22 @@ function vHelp(v){
   <div class="card"><h3>快捷键</h3>
     <div class="hint">回车 = 继续　空格 = 比赛暂停/继续　Esc = 关闭弹窗　表头点击 = 排序　表格行点击 = 查看详情</div></div>
   <div class="card"><h3>存档</h3>
-    <div class="hint">每次操作后都会自动保存到本浏览器，依次尝试 IndexedDB、Cache Storage、localStorage 三层，任意一层可用就存得住；关掉页面再打开点「继续游戏」即可接着玩。清理浏览器数据会连存档一起清掉，想长期保留或换设备，请在「存档」页导出 .json 文件。如果发现每次打开都要重新开局，去「存档」页底部跑一次「存储自检」。</div></div>`;
+    <div class="hint">每次操作后都会自动保存到本浏览器，依次尝试 IndexedDB、Cache Storage、localStorage 三层，任意一层可用就存得住；关掉页面再打开点「继续游戏」即可接着玩。清理浏览器数据会连存档一起清掉，想长期保留或换设备，请在「存档」页导出 .json 文件。如果发现每次打开都要重新开局，去「存档」页底部跑一次「存储自检」。</div></div>
+  <div class="card"><h3>反馈与建议</h3>
+    <div class="hint" style="line-height:1.85">玩到 bug、数值觉得不对劲，或者想看什么新功能，加微信直接聊：</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px">
+      <b id="wx-id" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:20px;letter-spacing:1px;color:var(--acc);user-select:all">lynchrrr</b>
+      <button class="sm" onclick="copyWx()">复制微信号</button>
+    </div>
+    <div class="hint" style="margin-top:6px">发消息时带上截图和存档页「存储自检」结果，定位问题会快很多。</div></div>`;
+}
+function copyWx(){
+  const id="lynchrrr";
+  const fallback=()=>{ try{ const r=document.createRange(); r.selectNodeContents(document.getElementById("wx-id"));
+      const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); toast("已选中微信号，长按复制即可"); }
+    catch(e){ toast("微信号："+id); } };
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(id).then(()=>toast("微信号已复制：lynchrrr")).catch(fallback);
+  else fallback();
 }
 
 /* ---------- 启动菜单 ---------- */
