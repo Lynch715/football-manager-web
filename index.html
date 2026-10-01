@@ -1529,6 +1529,7 @@ function compShort(f){
   if(f.comp==="L") return WORLD.leagues[f.lg]? WORLD.leagues[f.lg].short : "联赛";
   if(f.comp==="C") return NATIONS[f.nation]? NATIONS[f.nation].cup : "杯赛";
   if(EURO_COMPS[f.comp]) return EURO_COMPS[f.comp].short;
+  if(f.comp==="PO"){ const po=(WORLD.playoffs||[])[f.po]; return po? po.short : "附加赛"; }
   return f.comp;
 }
 function compLabel(f){
@@ -1539,9 +1540,11 @@ function compLabel(f){
     const rn=EURO_KO_NAMES[f.round-1]||"淘汰赛";
     return compShort(f)+" "+rn+(f.round<4? (f.leg===1?" 首回合":" 次回合") : "");
   }
+  if(f.comp==="PO"){ const po=(WORLD.playoffs||[])[f.po], R=po&&po.rounds[f.round-1];
+    return compShort(f)+" "+(R? R.name+(R.legs===2?(f.leg===1?" 首回合":" 次回合"):"") : ""); }
   return f.comp;
 }
-function compTagCls(f){ return f.comp==="L"?"t-i": (f.comp==="C"?"t-w":"t-eu"); }
+function compTagCls(f){ return f.comp==="L"?"t-i": (f.comp==="C"||f.comp==="PO"?"t-w":"t-eu"); }
 const C = id => WORLD.clubs[id];
 const UC = () => WORLD.clubs[WORLD.userClub];
 function money(n){
@@ -1653,9 +1656,246 @@ function buildSeason(){
   });
   WORLD.cups.forEach(cup=>scheduleCupRound(cup));
 
+  // ---- 升级附加赛（联赛踢完后才排对阵）----
+  WORLD.playoffs=makePlayoffs();
   // ---- 欧战 ----
   buildEuro();
   WORLD.fixtures.sort((a,b)=>a.day-b.day);
+}
+
+
+// ---------- 升级附加赛（2026-10 新增，按各国真实赛制）----------
+// po = {nation, tier(上级联赛层级), fmt, name, short, seed:{id:名次}, up16, rounds:[{name,legs,tb,neutral,ties:[{a,b,w,agg,legs}]}], cur, started, done, winner, skip}
+// a 永远是种子更好的一方（德法保级附加赛里上级联赛第 16 名种子记 0）。两回合时首回合在 b 主场、次回合在 a 主场。
+// tb：总比分 / 单场打平怎么分胜负。"pens" 踢点球；"seed" 种子高的晋级（西乙、意乙的真实规则）。
+const PO_ROUNDS={ENG:2, ESP:2, ITA:3, GER:1, FRA:3};
+function poFmtOf(ni){ const c=NATIONS[ni].code; return PO_ROUNDS[c]? c : "ENG"; }
+function makePlayoffs(){
+  const out=[];
+  NATIONS.forEach((nat,ni)=>{
+    for(let tier=0;tier<nat.tiers.length-1;tier++){
+      const fmt=poFmtOf(ni), up=nat.tiers[tier], lo=nat.tiers[tier+1];
+      const two=(fmt==="GER"||fmt==="FRA");
+      out.push({nation:ni, tier, fmt, name: two? `${up.short}/${lo.short}升降级附加赛` : `${lo.short}升级附加赛`,
+        short: two? `${up.short}升降级附加赛` : `${lo.short}附加赛`,
+        seed:{}, up16:null, rounds:[], cur:-1, started:false, done:false, winner:null, skip:false});
+    }
+  });
+  return out;
+}
+function ensurePlayoffs(){ if(!WORLD.playoffs) WORLD.playoffs=makePlayoffs(); return WORLD.playoffs; }
+// 下级联赛里打附加赛的名次（联赛页上色、玩法说明用）
+function poSeedsRange(fmt){ return fmt==="ITA"?[3,8] : fmt==="GER"?[3,3] : fmt==="FRA"?[3,5] : [3,6]; }
+function poHasUpper(fmt){ return fmt==="GER"||fmt==="FRA"; }
+
+function poLeaguesDone(po){
+  const lo=lgIndex(po.nation,po.tier+1), up=lgIndex(po.nation,po.tier);
+  return !WORLD.fixtures.some(f=>f.comp==="L" && !f.played && (f.lg===lo || (poHasUpper(po.fmt) && f.lg===up)));
+}
+// 本轮规格：赛制、基准日期、对阵（返回 null = 附加赛已经打完）
+function poRoundSpec(po, r){
+  const S=w=>satOf(w), P=k=>po.byPos[k];
+  const W=r>0? po.rounds[r-1].ties.map(t=>t.w).sort((x,y)=>po.seed[x]-po.seed[y]) : [];
+  const f=po.fmt;
+  if(f==="ENG"){
+    if(r===0) return {name:"半决赛", legs:2, tb:"pens", days:[S(37)+4,S(38)+1], ties:[[P(3),P(6)],[P(4),P(5)]]};
+    if(r===1) return {name:"决赛", legs:1, tb:"pens", neutral:true, days:[S(39)+1], ties:[[W[0],W[1]]]};
+  }
+  if(f==="ESP"){
+    if(r===0) return {name:"半决赛", legs:2, tb:"seed", days:[S(37)+4,S(38)+1], ties:[[P(3),P(6)],[P(4),P(5)]]};
+    if(r===1) return {name:"决赛", legs:2, tb:"seed", days:[S(39)+1,S(40)+1], ties:[[W[0],W[1]]]};
+  }
+  if(f==="ITA"){
+    if(r===0) return {name:"预选赛", legs:1, tb:"seed", days:[S(37)+4], ties:[[P(5),P(8)],[P(6),P(7)]]};
+    if(r===1) return {name:"半决赛", legs:2, tb:"seed", days:[S(38)+1,S(38)+4], ties:[[P(3),W[1]],[P(4),W[0]]]};
+    if(r===2) return {name:"决赛", legs:2, tb:"seed", days:[S(39)+1,S(40)+1], ties:[[W[0],W[1]]]};
+  }
+  if(f==="GER"){
+    if(r===0) return {name:"附加赛", legs:2, tb:"pens", days:[S(37)+4,S(38)+1], ties:[[po.up16,P(3)]]};
+  }
+  if(f==="FRA"){
+    if(r===0) return {name:"首轮", legs:1, tb:"pens", days:[S(37)+4], ties:[[P(4),P(5)]]};
+    if(r===1) return {name:"第二轮", legs:1, tb:"pens", days:[S(38)+1], ties:[[P(3),W[0]]]};
+    if(r===2) return {name:"决赛", legs:2, tb:"pens", days:[S(39)+1,S(40)+1], ties:[[po.up16,W[0]]]};
+  }
+  return null;
+}
+// 找一个两队前后两天都没比赛的日子（杯赛决赛、欧战决赛可能撞上）
+function poFreeDay(d, ids){
+  const busy=dd=>WORLD.fixtures.some(f=>(ids.includes(f.home)||ids.includes(f.away)) && Math.abs(f.day-dd)<=2);
+  let g=0; while(busy(d) && g++<30) d++;
+  return d;
+}
+function poSchedule(po, pi, r, today){
+  const sp=poRoundSpec(po,r); if(!sp) return false;
+  const R={name:sp.name, legs:sp.legs, tb:sp.tb, neutral:!!sp.neutral, ties:sp.ties.map(([a,b])=>({a,b,w:null}))};
+  po.rounds[r]=R; po.cur=r;
+  R.ties.forEach((t,ti)=>{
+    const ids=[t.a,t.b];
+    let d1=poFreeDay(Math.max(sp.days[0], today+2), ids);
+    if(R.legs===1){
+      WORLD.fixtures.push({day:d1, home:t.a, away:t.b, comp:"PO", po:pi, round:r+1, tie:ti, leg:1,
+        played:false, hg:0, ag:0, pens:null, neutral:R.neutral});
+      t.days=[d1];
+    } else {
+      WORLD.fixtures.push({day:d1, home:t.b, away:t.a, comp:"PO", po:pi, round:r+1, tie:ti, leg:1, played:false, hg:0, ag:0, pens:null});
+      const d2=poFreeDay(Math.max(sp.days[1], d1+3), ids);
+      WORLD.fixtures.push({day:d2, home:t.a, away:t.b, comp:"PO", po:pi, round:r+1, tie:ti, leg:2, played:false, hg:0, ag:0, pens:null});
+      t.days=[d1,d2];
+    }
+  });
+  WORLD.fixtures.sort((a,b)=>a.day-b.day);
+  return true;
+}
+function poLegs(pi, r, ti){ return WORLD.fixtures.filter(f=>f.comp==="PO"&&f.po===pi&&f.round===r+1&&f.tie===ti).sort((x,y)=>x.leg-y.leg); }
+function poTieWinner(R, t, legs){
+  if(R.legs===1){ const f=legs[0]; t.g1=[f.hg,f.ag]; t.pens=f.pens;
+    if(f.hg!==f.ag) return f.hg>f.ag? f.home : f.away;
+    if(f.pens) return f.pens[0]>f.pens[1]? f.home : f.away;
+    return t.a; }
+  const [l1,l2]=legs;                       // l1 在 b 主场，l2 在 a 主场
+  const ga=l1.ag+l2.hg, gb=l1.hg+l2.ag;
+  t.g1=[l1.hg,l1.ag]; t.g2=[l2.hg,l2.ag]; t.agg=[ga,gb]; t.pens=l2.pens;
+  if(ga!==gb) return ga>gb? t.a : t.b;
+  if(l2.pens) return l2.pens[0]>l2.pens[1]? t.a : t.b;
+  return t.a;                                 // 总比分打平、不踢点球：种子高的晋级
+}
+// 从 id 一方的视角写比分：「总比分 3-2」/「2-1」，点球另附
+function poScore(t,id){
+  const A=id===t.a, g=t.agg||t.g1, x=A?g[0]:g[1], y=A?g[1]:g[0];
+  const pen=t.pens? `，点球 ${A?t.pens[0]:t.pens[1]}-${A?t.pens[1]:t.pens[0]}` : "";
+  return (t.agg?"总比分 ":"")+x+"-"+y+pen;
+}
+function poInvolvesUser(po){ const u=WORLD.userClub; return po.seed[u]!=null; }
+function poStart(po, pi, today){
+  const lo=leagueTable(lgIndex(po.nation,po.tier+1));
+  po.byPos={}; lo.forEach(r=>po.byPos[r.rank]=r.id);
+  const [s0,s1]=poSeedsRange(po.fmt);
+  for(let k=s0;k<=s1;k++) if(po.byPos[k]!=null) po.seed[po.byPos[k]]=k;
+  if(poHasUpper(po.fmt)){
+    const up=leagueTable(lgIndex(po.nation,po.tier));
+    po.up16=up[up.length-3].id; po.seed[po.up16]=0;
+  }
+  po.started=true;
+  const u=UC();
+  // 意乙：第 3 名领先第 4 名 15 分及以上，附加赛取消
+  if(po.fmt==="ITA" && lo[2] && lo[3] && lo[2].pts-lo[3].pts>=15){
+    po.skip=true; po.done=true; po.winner=lo[2].id;
+    if(u.nation===po.nation) news(`${po.name}取消`,`${C(lo[2].id).cn} 领先第 4 名 ${lo[2].pts-lo[3].pts} 分，按规则直接升级，本赛季不打附加赛。`, po.winner===u.id?"good":"info");
+    return;
+  }
+  poSchedule(po, pi, 0, today);
+  if(poInvolvesUser(po)){
+    const R=po.rounds[0], t=R.ties.find(t=>t.a===u.id||t.b===u.id);
+    if(t){ const opp=C(t.a===u.id?t.b:t.a);
+      news(`${po.name}`, po.up16===u.id
+        ? `${u.cn} 排名第 ${LG(u).clubIds.length-2}，要和 ${opp.cn} 打两回合附加赛保级。首回合 ${fmtDate(dateOf(t.days[0]))}（客场），次回合回到主场。`
+        : `${u.cn} 进入${po.name}，${R.name}对手是 ${opp.cn}。${R.legs===2?`首回合 ${fmtDate(dateOf(t.days[0]))}（${t.b===u.id?"主场":"客场"}），次回合 ${fmtDate(dateOf(t.days[1]))}（${t.a===u.id?"主场":"客场"}）。`:`${fmtDate(dateOf(t.days[0]))}（${R.neutral?"中立场地":(t.a===u.id?"主场":"客场")}）。`}${R.tb==="seed"?"打平的话排名高的一方晋级。":""}`,"info");
+    } else {
+      // 种子还没进本轮（法乙第 3 名、意乙前两名先轮空）
+      news(`${po.name}`,`${u.cn} 进入${po.name}，首轮轮空，等待对手产生。`,"info");
+    }
+  }
+}
+function poResolve(po, pi, today){
+  const r=po.cur, R=po.rounds[r], u=WORLD.userClub;
+  R.ties.forEach((t,ti)=>{
+    t.w=poTieWinner(R,t,poLegs(pi,r,ti));
+    if(t.a===u||t.b===u){
+      const won=t.w===u, opp=C(t.a===u?t.b:t.a);
+      const sc=poScore(t,u);
+      const how=t.pens? "" : ((t.agg?t.agg[0]===t.agg[1]:t.g1[0]===t.g1[1])? `，按排名${won?"晋级":"出局"}` : "");
+      const last=r===PO_ROUNDS[po.fmt]-1;
+      if(!last) news(won?`附加赛${R.name}晋级`:`附加赛${R.name}出局`, `${C(u).cn} ${sc} ${won?"淘汰":"不敌"} ${opp.cn}${how}。${won?"":"本赛季的升级梦到此为止。"}`, won?"good":"bad");
+    }
+  });
+  if(po.cur+1 < PO_ROUNDS[po.fmt]){ poSchedule(po, pi, po.cur+1, today);
+    const R2=po.rounds[po.cur], t=R2.ties.find(t=>t.a===u||t.b===u);
+    if(t && !R.ties.some(x=>x.a===u||x.b===u)) news(`${po.name}${R2.name}`,`对手确定了：${C(t.a===u?t.b:t.a).cn}。${fmtDate(dateOf(t.days[0]))}开打。`,"info");
+    return; }
+  const fin=R.ties[0];
+  po.winner=fin.w; po.done=true;
+  const uc=UC(), w=C(fin.w), l=C(fin.w===fin.a?fin.b:fin.a);
+  const upName=NATIONS[po.nation].tiers[po.tier].short;
+  const promoted = !(poHasUpper(po.fmt) && fin.w===po.up16);
+  const sc=poScore(fin,fin.w);
+  const seedTie=!fin.pens && (fin.agg?fin.agg[0]===fin.agg[1]:fin.g1[0]===fin.g1[1]);
+  if(fin.a===u||fin.b===u){
+    if(fin.w===u) news(promoted?"附加赛胜出，升级！":"保级成功！", promoted
+      ? `${uc.cn} 在${po.name}${R.name}中击败 ${l.cn}（${sc}${seedTie?"，按排名胜出":""}），下赛季征战${upName}。`
+      : `${uc.cn} 在附加赛里顶住了 ${l.cn}（${sc}${seedTie?"，按排名胜出":""}），下赛季还留在${upName}。`,"good");
+    else { const lsc=poScore(fin,u)+(seedTie?"，按排名出局":"");
+      news(po.up16===u?"附加赛失利，降级":"附加赛决赛失利", po.up16===u
+      ? `${uc.cn} 在附加赛里输给了 ${w.cn}（${lsc}），下赛季降入${NATIONS[po.nation].tiers[po.tier+1].short}。`
+      : `${uc.cn} 倒在了最后一步，${R.name}不敌 ${w.cn}（${lsc}）。下赛季继续在${NATIONS[po.nation].tiers[po.tier+1].short}。`,"bad"); }
+  } else if(uc.nation===po.nation){
+    news(`${po.name}结束`, `${w.cn} 以 ${sc}${seedTie?"（按排名）":""} 战胜 ${l.cn}，${promoted?`通过附加赛升入${upName}`:`保住了${upName}席位`}。`,"info");
+  }
+}
+function playoffsDayEnd(day){
+  ensurePlayoffs().forEach((po,pi)=>{
+    if(po.done) return;
+    if(!po.started){ if(poLeaguesDone(po)) poStart(po,pi,day); return; }
+    const fx=WORLD.fixtures.filter(f=>f.comp==="PO"&&f.po===pi&&f.round===po.cur+1);
+    if(!fx.length || fx.some(f=>!f.played)) return;
+    poResolve(po,pi,day);
+  });
+}
+function poKnockoutOpts(f){
+  const po=(WORLD.playoffs||[])[f.po]; const R=po&&po.rounds[f.round-1];
+  if(!R) return {knockout:false};
+  if(R.legs===1) return {knockout:R.tb==="pens", neutral:R.neutral};
+  if(f.leg===2 && R.tb==="pens"){
+    const l1=WORLD.fixtures.find(x=>x.comp==="PO"&&x.po===f.po&&x.round===f.round&&x.tie===f.tie&&x.leg===1&&x.played);
+    return {knockout:true, aggBase: l1? [l1.ag,l1.hg] : [0,0]};
+  }
+  return {knockout:false};
+}
+// 附加赛对阵卡（联赛页）
+function poCard(po){
+  const card=el("div","card"); card.innerHTML=`<h3>${po.name}</h3>`;
+  const nm=id=>`${crestHTML(C(id))}<span style="${id===WORLD.userClub?'color:var(--acc);':''}">${esc(C(id).short)}</span>`;
+  const rule={ENG:"第 3–6 名参加。半决赛两回合，决赛在温布利一场定胜负，打平踢点球。",
+    ESP:"第 3–6 名参加。半决赛、决赛都是两回合，总比分打平时排名高的晋级。",
+    ITA:"第 3–8 名参加。5v8、6v7 先打单场预选赛，胜者分别挑战第 4、第 3 名；之后半决赛、决赛都是两回合，打平时排名高的晋级。第 3 名领先第 4 名 15 分以上时取消附加赛。",
+    GER:"德乙第 3 名对德甲第 16 名，两回合，打平踢点球。",
+    FRA:"法乙第 4、5 名先打单场，胜者客场挑战第 3 名，最后的胜者和法甲第 16 名打两回合，打平踢点球。"}[po.fmt];
+  if(!po.started){
+    const lo=leagueTable(lgIndex(po.nation,po.tier+1)), up=leagueTable(lgIndex(po.nation,po.tier));
+    const [s0,s1]=poSeedsRange(po.fmt);
+    const ids=lo.filter(r=>r.rank>=s0&&r.rank<=s1).map(r=>`<span style="white-space:nowrap">${r.rank}. ${nm(r.id)}</span>`);
+    if(poHasUpper(po.fmt) && up.length) ids.unshift(`<span style="white-space:nowrap">${NATIONS[po.nation].tiers[po.tier].short}第 ${up.length-2} 名 ${nm(up[up.length-3].id)}</span>`);
+    card.appendChild(el("div","hint",rule));
+    card.appendChild(el("div","",`<div style="font-size:12px;margin-top:6px">按当前排名：${ids.join("　")}</div><div class="hint" style="margin-top:4px">联赛最后一轮踢完后开打。</div>`));
+    return card;
+  }
+  if(po.skip){ card.appendChild(el("div","",`${nm(po.winner)} 领先第 4 名 15 分以上，直接升级，本赛季不打附加赛。`)); return card; }
+  if(po.done){
+    const promoted=!(poHasUpper(po.fmt)&&po.winner===po.up16);
+    card.appendChild(el("div","",`<div style="margin-bottom:8px">${promoted?"🏆 ":""}${nm(po.winner)} ${promoted?"通过附加赛升级":"保级成功"}</div>`));
+  }
+  po.rounds.forEach((R,r)=>{
+    card.appendChild(el("div","hint",`<b style="color:var(--txt)">${R.name}</b>${R.legs===2?" · 两回合":""}`));
+    R.ties.forEach((t,ti)=>{
+      let mid, note="";
+      if(t.w!=null){ mid=t.agg? `${t.agg[0]} - ${t.agg[1]}` : `${t.g1[0]} - ${t.g1[1]}`;
+        if(t.g2) note=`（客 ${t.g1[1]}-${t.g1[0]}，主 ${t.g2[0]}-${t.g2[1]}）`;
+        if(t.pens) note+=` 点球 ${t.pens[0]}-${t.pens[1]}`;
+        else if((t.agg?t.agg[0]===t.agg[1]:t.g1[0]===t.g1[1])) note+=" 排名高者晋级";
+      } else {
+        const legs=WORLD.fixtures.filter(f=>f.comp==="PO"&&f.po===WORLD.playoffs.indexOf(po)&&f.round===r+1&&f.tie===ti).sort((x,y)=>x.leg-y.leg);
+        const l1=legs[0];
+        mid = l1&&l1.played&&legs.length===2 ? `${l1.ag} - ${l1.hg}` : "vs";
+        note = legs.filter(f=>!f.played).map(f=>fmtDateShort(dateOf(f.day))+(legs.length===2?(f.leg===1?" 首回合":" 次回合"):"")).join("，")+(R.neutral?(po.fmt==="ENG"?" · 温布利":" · 中立场地"):"");
+        if(l1&&l1.played&&legs.length===2) note="首回合已赛 · 次回合 "+note;
+      }
+      card.appendChild(el("div","",`<div style="font-size:12px;padding:3px 0">
+        <span style="${t.w===t.a?'font-weight:700':''}">${nm(t.a)}</span>
+        <b style="background:#0b0f14;padding:1px 7px;border-radius:4px">${mid}</b>
+        <span style="${t.w===t.b?'font-weight:700':''}">${nm(t.b)}</span> <span class="hint">${note}</span></div>`));
+    });
+  });
+  return card;
 }
 
 // ---------- 国内杯赛 ----------
@@ -1861,6 +2101,7 @@ function euroFinish(E, fx){
 }
 // 每日收尾：推进各项杯赛
 function competitionsDayEnd(day){
+  playoffsDayEnd(day);
   WORLD.cups.forEach(cup=>{
     if(cup.cur<6 && cup.days[cup.cur]===day){
       const rem=WORLD.fixtures.some(f=>f.comp==="C"&&f.nation===cup.nation&&f.day===day&&!f.played);
@@ -1881,6 +2122,7 @@ function competitionsDayEnd(day){
 }
 // 创建比赛时的淘汰赛参数（是否需要点球、总比分基数）
 function knockoutOpts(f){
+  if(f.comp==="PO") return poKnockoutOpts(f);
   if(f.comp==="C") return {knockout:true, neutral:!!f.neutral};
   if(EURO_COMPS[f.comp] && f.stage==="K"){
     if(f.round===4) return {knockout:true, neutral:true};
@@ -4080,20 +4322,38 @@ function endSeason(){
     qual.EL.push(...el.filter(x=>x!=null));
   });
   WORLD.euroQual=qual;
-  // ---- 升降级（各国相邻两级之间：2 队直升 + 附加赛 1 队；3 队降级）----
+  // ---- 升降级：2 队直升 + 附加赛。英西意 3 队直降；德法 2 队直降，第 16 名打附加赛 ----
   const moves=[];
   NATIONS.forEach((nat,ni)=>{
     for(let tier=0;tier<nat.tiers.length-1;tier++){
       const upper=tables[lgIndex(ni,tier)], lower=tables[lgIndex(ni,tier+1)];
       const promoted=[lower[0].id, lower[1].id];
-      const po=[lower[2].id,lower[3].id,lower[4].id,lower[5].id];
-      const s1=poGame(po[0],po[3]), s2=poGame(po[1],po[2]);
-      const win=poGame(s1,s2);
-      promoted.push(win);
-      const relegated=upper.slice(-3).map(r=>r.id);
+      const PO=(WORLD.playoffs||[]).find(p=>p.nation===ni && p.tier===tier);
+      let relegated, win;
+      if(PO && PO.done && PO.winner!=null){
+        win=PO.winner;
+        if(poHasUpper(PO.fmt)){
+          relegated=upper.slice(-2).map(r=>r.id);
+          if(win!==PO.up16){ promoted.push(win); relegated.push(PO.up16); }
+        } else { promoted.push(win); relegated=upper.slice(-3).map(r=>r.id); }
+        // 附加赛没升上去的：打进来本身也算交差
+        Object.keys(PO.seed).map(Number).forEach(id=>{
+          if(promoted.includes(id) || id===PO.up16) return;
+          const inFinal=PO.rounds.length && PO.rounds[PO.rounds.length-1].ties.some(t=>t.a===id||t.b===id);
+          C(id).board.conf=clamp(C(id).board.conf+(inFinal?10:5),0,100);
+        });
+        if(PO.up16!=null && win===PO.up16) C(PO.up16).board.conf=clamp(C(PO.up16).board.conf+8,0,100);
+      } else {
+        // 兜底（附加赛没打完就结算，比如老存档恰好卡在赛季末）：按阵容实力模拟
+        const po=[lower[2].id,lower[3].id,lower[4].id,lower[5].id];
+        const s1=poGame(po[0],po[3]), s2=poGame(po[1],po[2]);
+        win=poGame(s1,s2); promoted.push(win);
+        relegated=upper.slice(-3).map(r=>r.id);
+      }
       moves.push({nation:ni, tier, promoted, relegated, poWin:win});
     }
   });
+  summary.playoffs=(WORLD.playoffs||[]).map(p=>({nation:p.nation,tier:p.tier,name:p.name,winner:p.winner,up16:p.up16,skip:p.skip}));
   moves.forEach(mv=>{
     const upName=NATIONS[mv.nation].tiers[mv.tier], downName=NATIONS[mv.nation].tiers[mv.tier+1];
     mv.promoted.forEach(id=>{ const c=C(id); c.tier=mv.tier; c.lg=upName.lg; c.board.conf=clamp(c.board.conf+28,0,100);
@@ -5872,6 +6132,10 @@ function vLeague(v){
   const lgIdx=lgIndex(LGNATION,LGTIER), lg=WORLD.leagues[lgIdx];
   const tbl=leagueTable(lgIdx), n=tbl.length, top=LGTIER===0, bottom=LGTIER===nat.tiers.length-1;
   const sqR=squadRanks(lg);
+  const PO_UP=(ensurePlayoffs()).find(p=>p.nation===LGNATION&&p.tier===LGTIER);      // 本联赛作为上级
+  const PO_LO=(WORLD.playoffs).find(p=>p.nation===LGNATION&&p.tier===LGTIER-1);       // 本联赛作为下级
+  const poR=PO_LO? poSeedsRange(PO_LO.fmt) : [3,6];
+  const relN=(PO_UP && poHasUpper(PO_UP.fmt))? 2 : 3;
   const card=el("div","card"); card.innerHTML=`<h3>${lg.name} 积分榜 <span class="hint" style="font-weight:400">「阵容」= 阵容实力在本联赛的名次，和排名一比就知道谁在超额完成</span></h3>`;
   card.appendChild(makeTable([
     {h:"#",k:"rank",cls:"num",v:r=>r.rank,desc:false,r:r=>r.rank},
@@ -5890,13 +6154,18 @@ function vLeague(v){
         else if(r.rank<=nat.cl+nat.el) row.style.borderLeft="3px solid #f0a020";
       } else {
         if(r.rank<=2) row.style.borderLeft="3px solid #00d47e";
-        else if(r.rank<=6) row.style.borderLeft="3px solid #4a9eff";
+        else if(r.rank>=poR[0] && r.rank<=poR[1]) row.style.borderLeft="3px solid #4a9eff";
       }
-      if(!bottom && r.rank>n-3) row.style.borderLeft="3px solid #e5484d";
+      if(!bottom && r.rank>n-relN) row.style.borderLeft="3px solid #e5484d";
+      else if(!bottom && relN===2 && r.rank===n-2) row.style.borderLeft="3px solid #b07cff";
     }}));
-  card.appendChild(el("div","hint", top? "绿：欧冠资格　橙：欧联资格（另一席给杯赛冠军）　红：降级区"
-                                     : bottom? "绿：直接升级　蓝：附加赛" : "绿：直接升级　蓝：附加赛　红：降级区"));
+  const relTxt = relN===2? "　紫：保级附加赛　红：直接降级" : "　红：降级区";
+  card.appendChild(el("div","hint", top? "绿：欧冠资格　橙：欧联资格（另一席给杯赛冠军）"+(bottom?"":relTxt)
+                                     : "绿：直接升级　蓝：附加赛"+(bottom?"":relTxt)));
   v.appendChild(card);
+  // 附加赛：下级联赛页一定显示；上级联赛页在德法（第 16 名要打）或附加赛开打后显示
+  if(PO_LO) v.appendChild(poCard(PO_LO));
+  if(PO_UP && (poHasUpper(PO_UP.fmt) || PO_UP.started) && (PO_UP.started || LG(UC())===lg)) v.appendChild(poCard(PO_UP));
 
   // 本轮赛果
   const played=WORLD.fixtures.filter(f=>f.comp==="L"&&f.lg===lgIdx&&f.played).sort((a,b)=>b.day-a.day);
@@ -7022,7 +7291,7 @@ function vHelp(v){
       <b>只有一笔钱</b>：董事会不再分别给转会预算和工资预算，财政页的<b>「可用资金」</b>回答的是「一个人都不签，打完这季手里能剩多少」——余额 + 本季剩余预计营收的八成 − 本季剩余工资 − 董事会锁定的那部分。付转会费、发新合同的工资都从这一个数里扣；卖人、合同到期都往里加。一次性的转会费和每年都要付的工资之间不需要汇率：工资明年还要付，明年这个数自然就少了。
       另一道闸是<b>「下季工资承诺」</b>——下赛季仍在合同期的球员年薪合计，不能超过预计营收的 75%（顶级联赛）/ 85% / 90%。顶到上限就签不了抬高承诺的新约，只能原薪续约、等合同到期或卖人。租借下季不在，不占这个额度。
       董事会每周根据你与期望排名的差距调整信心，赛季末若长期远低于期望会被解雇。
-      升级、夺冠会大幅提升信心，降级则相反。各国相邻级别之间每年 <b>3 升 3 降</b>（第 3–6 名打附加赛）。<br>
+      升级、夺冠会大幅提升信心，降级则相反。升降级按各国真实规则：下级联赛前 2 名直接升级，第三个名额由<b>附加赛</b>决出——英格兰、西班牙第 3–6 名，意大利第 3–8 名（第 3 名领先第 4 名 15 分以上时直接升级），这三国上级联赛 3 队直降；德国是德乙第 3 名对德甲第 16 名，法国是法乙第 3–5 名打完后挑战法甲第 16 名，这两国 2 队直降。附加赛在联赛结束后真打，赛事页有对阵。<br>
       董事会的期望一半看声望、一半看你的<b>阵容实力</b>；赛事页积分榜的「阵容」列是阵容实力在本联赛的名次，和排名一比就知道谁在超额完成。<br>
       联赛转播分成一半按月到账、一半赛季末按名次结算，赛季中途余额为负很正常，别急着卖人。</div></div>
     <div class="card"><h3>杯赛与欧战</h3>
