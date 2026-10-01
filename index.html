@@ -362,31 +362,32 @@ img.crest{display:inline-block}
 
 /* 横屏手机：保留左侧图标导航，纵向空间优先 */
 @media (max-height:520px) and (orientation:landscape){
-  #topbar{height:calc(40px + var(--sat));flex:0 0 calc(40px + var(--sat));padding-top:var(--sat)}
-  #tb-crest{width:24px;height:24px;flex:0 0 24px}
-  #tb-crest img{width:24px;height:24px}
-  #main{flex-direction:row}
-  #view{order:2}
-  #side{order:1;
+  /* 安卓/鸿蒙弹键盘会把视口压扁，看起来像横屏；html.kb 时不切横屏布局（见 kbGuard） */
+  html:not(.kb) #topbar{height:calc(40px + var(--sat));flex:0 0 calc(40px + var(--sat));padding-top:var(--sat)}
+  html:not(.kb) #tb-crest{width:24px;height:24px;flex:0 0 24px}
+  html:not(.kb) #tb-crest img{width:24px;height:24px}
+  html:not(.kb) #main{flex-direction:row}
+  html:not(.kb) #view{order:2}
+  html:not(.kb) #side{order:1;
     width:calc(60px + var(--sal));flex:0 0 calc(60px + var(--sal));
     height:auto;flex-direction:column;flex-wrap:nowrap;align-items:stretch;
     overflow-y:auto;overflow-x:hidden;
     border-top:none;border-right:1px solid var(--line);
     padding:2px 0 var(--sab) var(--sal)}
-  .nav{flex:0 0 auto}
-  .nav{min-width:0;margin:0;border-radius:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
-  .nav.on{background:var(--bg3);border-left-color:var(--acc);border-top-color:transparent}
-  #view{padding:9px calc(11px + var(--sar)) calc(16px + var(--sab)) 11px}
-  #mfeed{height:150px}
-  .card{margin-bottom:9px}
-  .col{min-width:0 !important}
-  .mcol-main{flex:1 1 60% !important}
-  .mcol-side{flex:1 1 34% !important;min-width:250px !important}
-  .tac-pitch{flex:1 1 46% !important;min-width:280px !important}
-  .tac-pitch>div[style*="aspect-ratio"]{max-height:260px !important;min-height:200px !important}
-  .grid2{grid-template-columns:1fr 1fr}
-  .grid4{grid-template-columns:repeat(4,1fr)}
-  #modal-box{max-height:100svh}
+  html:not(.kb) .nav{flex:0 0 auto}
+  html:not(.kb) .nav{min-width:0;margin:0;border-radius:0;padding:7px 2px;font-size:9px;border-top:none;border-left:3px solid transparent}
+  html:not(.kb) .nav.on{background:var(--bg3);border-left-color:var(--acc);border-top-color:transparent}
+  html:not(.kb) #view{padding:9px calc(11px + var(--sar)) calc(16px + var(--sab)) 11px}
+  html:not(.kb) #mfeed{height:150px}
+  html:not(.kb) .card{margin-bottom:9px}
+  html:not(.kb) .col{min-width:0 !important}
+  html:not(.kb) .mcol-main{flex:1 1 60% !important}
+  html:not(.kb) .mcol-side{flex:1 1 34% !important;min-width:250px !important}
+  html:not(.kb) .tac-pitch{flex:1 1 46% !important;min-width:280px !important}
+  html:not(.kb) .tac-pitch>div[style*="aspect-ratio"]{max-height:260px !important;min-height:200px !important}
+  html:not(.kb) .grid2{grid-template-columns:1fr 1fr}
+  html:not(.kb) .grid4{grid-template-columns:repeat(4,1fr)}
+  html:not(.kb) #modal-box{max-height:100svh}
 }
 </style>
 </head>
@@ -7355,12 +7356,31 @@ function fitAppHeight(){
   const h=window.innerHeight;
   if(h && h>a.clientHeight+1){ a.style.bottom="auto"; a.style.height=h+"px"; }
 }
+function isTextInput(e){
+  return !!e && (e.tagName==="TEXTAREA" || e.isContentEditable ||
+    (e.tagName==="INPUT" && !/^(checkbox|radio|range|button|submit|reset|color|file|hidden)$/i.test(e.type||"")));
+}
+// 聚焦输入框时若当前不是横屏布局，就锁住竖屏布局，键盘把视口压扁也不切换
+function kbGuard(){
+  const mq="(max-height:520px) and (orientation:landscape)", R=document.documentElement;
+  document.addEventListener("focusin",e=>{
+    if(isTextInput(e.target) && !(window.matchMedia && matchMedia(mq).matches)) R.classList.add("kb"); });
+  document.addEventListener("focusout",()=>{
+    setTimeout(()=>{ if(!isTextInput(document.activeElement)) R.classList.remove("kb"); },120); });
+}
 function watchOrientation(){
+  kbGuard();
   fitAppHeight(); setTimeout(fitAppHeight,400);
   window.addEventListener("resize",()=>setTimeout(fitAppHeight,80));
-  const key=()=>innerWidth>innerHeight?"L":"P";
+  // 不能用 innerWidth>innerHeight：安卓/鸿蒙弹出键盘会把视口压扁，被当成横屏 → 重绘 → 输入框被销毁、键盘收起、页面跳回顶部
+  const key=()=>{
+    try{ if(screen.orientation && screen.orientation.type) return screen.orientation.type.indexOf("landscape")===0?"L":"P"; }catch(e){}
+    if(typeof window.orientation==="number") return Math.abs(window.orientation)===90?"L":"P";
+    return innerWidth>innerHeight?"L":"P";
+  };
   _oriLast=key();
   const on=()=>{
+    if(isTextInput(document.activeElement)) return;     // 正在打字（键盘弹出引起的 resize）
     if(key()===_oriLast) return;
     _oriLast=key();
     clearTimeout(_oriT);
