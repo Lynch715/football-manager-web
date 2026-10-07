@@ -93,6 +93,31 @@ h2{font-size:15px;font-weight:700;margin:18px 0 8px}
 .card>h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--txt);
   display:flex;align-items:center;gap:8px}
 .card>h3 .tag{margin-left:auto}
+/* 折叠栏目 */
+.card.fold{padding:0;overflow:hidden;transition:border-color .25s}
+.card.fold.open{border-color:#334050}
+.fold>.fh{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:12px 14px;background:none;border:0;border-radius:0;
+  color:var(--txt);font:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fold>.fh:active{background:rgba(255,255,255,.025)}
+.fold>.fh:focus-visible{outline:2px solid var(--info);outline-offset:-2px}
+.fold .fa{flex:0 0 3px;align-self:stretch;border-radius:2px;background:var(--line);margin:-2px 0;transition:background .25s}
+.fold.open .fa{background:var(--acc)}
+.fold .ft{font-size:13.5px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.fold .fs{flex:1;min-width:0;display:flex;gap:6px;justify-content:flex-end;align-items:center;overflow:hidden;white-space:nowrap}
+.fold .chip{flex:0 0 auto;font-size:11px;color:var(--dim);background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-variant-numeric:tabular-nums}
+.fold .chip.hot{color:#ffb070;border-color:rgba(255,122,69,.35);background:rgba(255,122,69,.08)}
+.fold .chip.ok{color:var(--acc);border-color:rgba(0,212,126,.3);background:rgba(0,212,126,.07)}
+.fold .chev{flex:0 0 26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--bg3);border:1px solid var(--line);
+  transition:transform .3s cubic-bezier(.2,.8,.2,1),background .25s,border-color .25s}
+.fold .chev svg{width:12px;height:12px;stroke:var(--dim);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:stroke .25s}
+.fold.open .chev{transform:rotate(180deg);background:rgba(0,212,126,.1);border-color:rgba(0,212,126,.35)}
+.fold.open .chev svg{stroke:var(--acc)}
+.fold .fb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s cubic-bezier(.2,.8,.2,1)}
+.fold.open .fb{grid-template-rows:1fr}
+.fold .fbi{min-height:0;overflow:hidden}
+.fold .fbc{padding:0 14px 14px;border-top:1px solid transparent;opacity:0;transform:translateY(-4px);transition:opacity .22s,transform .3s,border-color .25s}
+.fold.open .fbc{opacity:1;transform:none;border-top-color:var(--line);padding-top:12px}
+@media (prefers-reduced-motion:reduce){ .fold .fb,.fold .fbc,.fold .chev,.fold .fa{transition:none} }
 .row{display:flex;gap:14px;flex-wrap:wrap}
 .col{flex:1;min-width:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -4782,14 +4807,47 @@ function renderTop(){
   $("#tb-next").textContent = nf? (nf.day===WORLD.day?"今天":(nf.day-WORLD.day)+"天") : "赛季末";
 }
 
+/* 同一页面里的操作（筛选、排序、接受报价……）重画时保留滚动位置；只有换页才回顶部。
+   原来每次 render 都 scrollTop=0，手机上筛完要再滑回去。 */
+let LAST_VIEW=null;
 function render(){
   markDirty();
   renderNav(); renderTop();
-  const v=$("#view"); v.scrollTop=0;
+  const v=$("#view");
+  const keepY = (LAST_VIEW===VIEW)? v.scrollTop : 0;
   const fn={home:vHome,inbox:vInbox,squad:vSquad,tactics:vTactics,training:vTraining,youth:vYouth,
     transfer:vTransfer,scout:vScout,finance:vFinance,build:vBuild,club:vClub,league:vLeague,schedule:vSchedule,
     stats:vStats,history:vHistory,save:vSave,crests:vCrests,help:vHelp,match:vMatch}[VIEW]||vHome;
   v.innerHTML=""; fn(v);
+  LAST_VIEW=VIEW;
+  v.scrollTop=keepY;
+  if(keepY) requestAnimationFrame(()=>{ if(LAST_VIEW===VIEW && Math.abs(v.scrollTop-keepY)>1) v.scrollTop=keepY; });
+}
+
+// ---------- 折叠栏目 ----------
+// 把一张已经画好的 .card（第一个子元素是 h3）改成可折叠栏目。展开状态按 key 存在本机。
+const FOLD_LS="fm_fold_v1";
+let FOLD_STATE=(()=>{ try{ return JSON.parse(localStorage.getItem(FOLD_LS))||{}; }catch(e){ return {}; } })();
+function foldCard(card, key, title, chips, defOpen){
+  const h=card.querySelector(":scope>h3"); let sub=null;
+  if(h){ const hs=h.querySelector(".hint"); if(hs){ sub=el("div","hint"); sub.style.marginBottom="10px"; sub.innerHTML=hs.innerHTML; } h.remove(); }
+  const kids=[...card.childNodes];
+  const open = (key in FOLD_STATE)? !!FOLD_STATE[key] : !!defOpen;
+  card.className="card fold"+(open?" open":"");
+  card.innerHTML=`<button type="button" class="fh" aria-expanded="${open}"><span class="fa"></span><span class="ft">${title}</span>`+
+    `<span class="fs">${chips.filter(Boolean).map(([t,c,id])=>`<span class="chip${c?" "+c:""}"${id?` id="${id}"`:""}>${t}</span>`).join("")}</span>`+
+    `<span class="chev" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></span></button>`+
+    `<div class="fb"><div class="fbi"><div class="fbc"></div></div></div>`;
+  const body=card.querySelector(".fbc"), fb=card.querySelector(".fb"), btn=card.querySelector(".fh");
+  if(sub) body.appendChild(sub);
+  kids.forEach(n=>body.appendChild(n));
+  fb.inert=!open;
+  btn.onclick=()=>{
+    const o=!card.classList.contains("open");
+    card.classList.toggle("open",o); btn.setAttribute("aria-expanded",o); fb.inert=!o;
+    FOLD_STATE[key]=o; try{ localStorage.setItem(FOLD_LS, JSON.stringify(FOLD_STATE)); }catch(e){}
+  };
+  return card;
 }
 
 // ---------- 表格排序 ----------
@@ -5393,7 +5451,8 @@ function vTactics(v){
     const d=el("div"); d.style.marginBottom="9px";
     d.innerHTML=`<label>${n}：<b style="color:var(--acc)">${arr[t[k]]}</b></label>`;
     const r=el("input"); r.type="range"; r.min=0; r.max=4; r.value=t[k]; r.style.width="100%";
-    r.oninput=e=>{ t[k]=+e.target.value; render(); };
+    r.oninput=e=>{ const b=d.querySelector("label b"); if(b) b.textContent=arr[+e.target.value]; };   // 拖动中不重画，否则手指下的滑块被换掉
+    r.onchange=e=>{ t[k]=+e.target.value; render(); };
     d.appendChild(r); set.appendChild(d);
   });
   const chk=el("div","hint");
@@ -5622,7 +5681,6 @@ function vTransfer(v){
     d.appendChild(acts);
     rm.appendChild(d);
   });
-  v.appendChild(rm);
 
   // 租借：我租出去的 / 租进来的
   const lo=loanedOutOf(c).map(i=>P(i)).filter(p=>p&&p.loan), lin=c.squad.map(i=>P(i)).filter(p=>p.loan);
@@ -5642,7 +5700,6 @@ function vTransfer(v){
     {h:"工资分担",k:"ws",cls:"num",mh:true,v:p=>p.loan.wageShare,r:p=>`借方 ${Math.round(p.loan.wageShare*100)}%`},
     {h:"条款",k:"cl",nos:true,r:p=>p.loan.minApps?(loanClauseMet(p)?'<span class="tag t-ok">出场达标</span>':'<span class="tag t-w">未履行</span>'):'<span class="hint">无</span>'}
   ], [...lo,...lin], {onRow:p=>showPlayer(p.id)}));
-  v.appendChild(lk);
 
   // 租借市场：别家愿意外租的球员
   const lm=el("div","card");
@@ -5661,7 +5718,6 @@ function vTransfer(v){
     {h:"你付周薪",k:"w",cls:"num",v:p=>p.wage*loanTermsFor(p,c).wageShare,r:p=>{const t=loanTermsFor(p,c); const w=p.wage*t.wageShare, fit=canAfford(c, t.fee||0, w*52, {nextYear:false}).ok; return `<span style="color:${fit?"":"var(--bad)"}">${money(w)}</span>${t.wageShare<1?`<span class="hint"> (${Math.round(t.wageShare*100)}%)</span>`:""}`;}},
     {h:"条款",k:"cl",nos:true,mh:true,r:p=>loanTermsFor(p,c).minApps?'<span class="tag t-w">出场 ≥60%</span>':'<span class="hint">无</span>'}
   ], lpool, {onRow:p=>showPlayer(p.id)}));
-  v.appendChild(lm);
 
   // 搜索
   const s=el("div","card"); s.innerHTML="<h3>球员搜索</h3>";
@@ -5675,34 +5731,42 @@ function vTransfer(v){
     <div><label>姓名</label><div class="ctl"><input id="f-q" type="text" value="${esc(TFILTER.q)}" style="width:120px" placeholder="搜索…"></div></div>`;
   s.appendChild(f);
 
-  let pool=Object.values(WORLD.players).filter(p=>p.clubId!==WORLD.userClub && !p.loan);
-  if(TFILTER.pos) pool=pool.filter(p=>p.pos===TFILTER.pos||p.pos2.includes(TFILTER.pos));
-  if(TFILTER.tier==="fa") pool=pool.filter(p=>p.clubId<0);
-  else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).nation===EURO_NATION);
-  else if(TFILTER.tier!=="") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).lg==TFILTER.tier);
-  if(TFILTER.minCa) pool=pool.filter(p=>ovr(p)>=TFILTER.minCa);
-  pool=pool.filter(p=>p.age<=TFILTER.maxAge);
-  if(TFILTER.maxFee) pool=pool.filter(p=>askingPrice(p)<=TFILTER.maxFee);
-  if(TFILTER.q) pool=pool.filter(p=>p.cn.includes(TFILTER.q)||p.name.toLowerCase().includes(TFILTER.q.toLowerCase()));
-  pool.sort((a,b)=>b.ca-a.ca);
-  const total=pool.length; pool=pool.slice(0,120);
-  s.appendChild(el("div","hint",`找到 ${total} 名球员，显示前 ${pool.length} 名`));
-  if(!SORT.k){SORT.k="ca";SORT.d=-1;}
-  s.appendChild(makeTable([
-    {h:"姓名",k:"n",v:p=>p.cn,r:p=>esc(p.cn)},
-    {h:"俱乐部",k:"c",v:p=>p.clubId>=0?C(p.clubId).cn:"",r:p=>p.clubId>=0?crestHTML(C(p.clubId))+esc(C(p.clubId).short):'<span class="tag t-n">自由</span>'},
-    {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>`},
-    {h:"年龄",k:"age",cls:"num",v:p=>p.age,r:p=>p.age},
-    {h:"能力",k:"ca",cls:"num",v:p=>p.ca,r:p=>`<b style="color:${caColor(p.ca)}">${ovr(p)}</b>`},
-    {h:"进球",k:"g",cls:"num",v:p=>p.goals,r:p=>p.goals},
-    {h:"评分",k:"rt",cls:"num",v:p=>p.apps?p.ratingSum/p.apps:0,r:p=>avgRating(p)},
-    {h:"要求周薪",k:"w",cls:"num",v:p=>wageDemand(p,c),r:p=>{
-      const d=wageDemand(p,c), r=canAfford(c, p.clubId>=0?askingPrice(p):0, d*52);
-      return `<span style="color:${r.ok?"":"var(--bad)"}" title="${r.ok?"可用资金与工资承诺都容得下":(r.why==="cash"?"可用资金不足":"下季工资承诺会超过董事会上限")}">${money(d)}</span>`;}},
-    {h:"要价",k:"ask",cls:"num",v:p=>askingPrice(p),r:p=>`<b>${money(askingPrice(p))}</b>`},
-    {h:"",k:"z",nos:true,r:p=>(p.listed?'<span class="tag t-w">挂牌</span>':'')+perfTag(p)+(WORLD.shortlist.some(x=>x.id===p.id)?'<span class="tag t-i">关注中</span>':'')}
-  ], pool, {onRow:p=>showPlayer(p.id)}));
-  v.appendChild(s);
+  // 结果区单独重画：输入姓名时不整页重画，输入框不会失焦、键盘不会收起
+  const sr=el("div"); s.appendChild(sr);
+  let searchTotal=0;
+  function fillSearch(){
+    sr.innerHTML="";
+    let pool=Object.values(WORLD.players).filter(p=>p.clubId!==WORLD.userClub && !p.loan);
+    if(TFILTER.pos) pool=pool.filter(p=>p.pos===TFILTER.pos||p.pos2.includes(TFILTER.pos));
+    if(TFILTER.tier==="fa") pool=pool.filter(p=>p.clubId<0);
+    else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).nation===EURO_NATION);
+    else if(TFILTER.tier!=="") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).lg==TFILTER.tier);
+    if(TFILTER.minCa) pool=pool.filter(p=>ovr(p)>=TFILTER.minCa);
+    pool=pool.filter(p=>p.age<=TFILTER.maxAge);
+    if(TFILTER.maxFee) pool=pool.filter(p=>askingPrice(p)<=TFILTER.maxFee);
+    if(TFILTER.q) pool=pool.filter(p=>p.cn.includes(TFILTER.q)||p.name.toLowerCase().includes(TFILTER.q.toLowerCase()));
+    pool.sort((a,b)=>b.ca-a.ca);
+    const total=pool.length; pool=pool.slice(0,120);
+    sr.appendChild(el("div","hint",`找到 ${total} 名球员，显示前 ${pool.length} 名`));
+    if(!SORT.k){SORT.k="ca";SORT.d=-1;}
+    sr.appendChild(makeTable([
+      {h:"姓名",k:"n",v:p=>p.cn,r:p=>esc(p.cn)},
+      {h:"俱乐部",k:"c",v:p=>p.clubId>=0?C(p.clubId).cn:"",r:p=>p.clubId>=0?crestHTML(C(p.clubId))+esc(C(p.clubId).short):'<span class="tag t-n">自由</span>'},
+      {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>`},
+      {h:"年龄",k:"age",cls:"num",v:p=>p.age,r:p=>p.age},
+      {h:"能力",k:"ca",cls:"num",v:p=>p.ca,r:p=>`<b style="color:${caColor(p.ca)}">${ovr(p)}</b>`},
+      {h:"进球",k:"g",cls:"num",v:p=>p.goals,r:p=>p.goals},
+      {h:"评分",k:"rt",cls:"num",v:p=>p.apps?p.ratingSum/p.apps:0,r:p=>avgRating(p)},
+      {h:"要求周薪",k:"w",cls:"num",v:p=>wageDemand(p,c),r:p=>{
+        const d=wageDemand(p,c), r=canAfford(c, p.clubId>=0?askingPrice(p):0, d*52);
+        return `<span style="color:${r.ok?"":"var(--bad)"}" title="${r.ok?"可用资金与工资承诺都容得下":(r.why==="cash"?"可用资金不足":"下季工资承诺会超过董事会上限")}">${money(d)}</span>`;}},
+      {h:"要价",k:"ask",cls:"num",v:p=>askingPrice(p),r:p=>`<b>${money(askingPrice(p))}</b>`},
+      {h:"",k:"z",nos:true,r:p=>(p.listed?'<span class="tag t-w">挂牌</span>':'')+perfTag(p)+(WORLD.shortlist.some(x=>x.id===p.id)?'<span class="tag t-i">关注中</span>':'')}
+    ], pool, {onRow:p=>showPlayer(p.id), rerender:fillSearch}));
+    searchTotal=total;
+    const ch=document.getElementById("chip-search"); if(ch) ch.textContent=`找到 ${total} 人`;
+  }
+  fillSearch();
 
   // 转会动态
   const log=el("div","card");
@@ -5717,12 +5781,33 @@ function vTransfer(v){
       ${t.from>=0?esc(C(t.from).short):"自由身"} → <b>${esc(C(t.to).short)}</b></span>
       <span style="flex:0 0 auto;white-space:nowrap;color:var(--acc)">${t.loan===1?'<span class="tag t-i">租借</span>'+(t.fee?" "+money(t.fee):""):t.loan===2?'<span class="tag t-n">租借归队</span>':(t.fee?money(t.fee):"免签")}</span></div>`));
   });
-  v.appendChild(log);
 
+  // ---- 折叠栏目：报价不折叠；搜索默认展开并提到第二位，其余默认收起 ----
+  {
+    const watched=hot.filter(p=>its.some(it=>it.pid===p.id)).length;
+    const bigs=new Set(its.map(it=>C(it.club)).filter(b=>b.rep>c.rep+8).map(b=>b.id)).size;
+    const listedN=c.squad.map(i=>P(i)).filter(p=>p&&p.listed).length;
+    const unmet=[...lo,...lin].filter(p=>p.loan&&p.loan.minApps&&!loanClauseMet(p)).length;
+    const seasonFee=thisSeason.reduce((a,t)=>a+t.fee,0);
+    v.appendChild(foldCard(s,"tr-search","球员搜索",[[`找到 ${searchTotal} 人`,"","chip-search"]],true));
+    v.appendChild(foldCard(rm,"tr-rumor","转会传闻",[
+      watched? [`${watched} 人被关注`] : (hot.length? null : ["暂无关注"]),
+      bigs? [`${bigs} 家豪门`,"hot"] : null,
+      listedN? [`挂牌 ${listedN}`] : null,
+      (!watched && hot.length)? [`${hot.length} 人有热度`] : null],false));
+    v.appendChild(foldCard(lk,"tr-loan","租借",[[`外租 ${lo.length}`],[`租入 ${lin.length}`], unmet? [`${unmet} 项条款未达标`,"hot"] : null],false));
+    v.appendChild(foldCard(lm,"tr-loanmkt","租借市场",[[`${ltotal} 人可租`]],false));
+    v.appendChild(foldCard(log,"tr-log","转会动态",[[`本季 ${thisSeason.length} 笔`], thisSeason.length? [money(seasonFee)] : null],false));
+  }
   const bind=(id,fn)=>{const e=$(id); if(e) e.onchange=ev=>{fn(ev.target.value);render();};};
   bind("#f-pos",x=>TFILTER.pos=x); bind("#f-tier",x=>TFILTER.tier=x);
   bind("#f-fee",x=>TFILTER.maxFee=+x*1e6); bind("#f-ca",x=>TFILTER.minCa=+x);
-  bind("#f-age",x=>TFILTER.maxAge=+x); bind("#f-q",x=>TFILTER.q=x);
+  bind("#f-age",x=>TFILTER.maxAge=+x);
+  // 滑块拖动时标签实时变化，松手才筛选
+  const live=(id,fmt)=>{ const e=$(id); if(!e) return; e.oninput=ev=>{ const b=e.closest(".ctl").parentElement.querySelector("label b"); if(b) b.textContent=fmt(+ev.target.value); }; };
+  live("#f-fee",x=>x?money(x*1e6):"不限"); live("#f-ca",x=>x||"不限"); live("#f-age",x=>x);
+  // 姓名边打边搜（停 0.3 秒），只重画结果区
+  { const q=$("#f-q"); if(q){ let tm=null; q.oninput=ev=>{ clearTimeout(tm); const val=ev.target.value; tm=setTimeout(()=>{ TFILTER.q=val; fillSearch(); },300); }; } }
 }
 
 function toggleShortlist(pid){
