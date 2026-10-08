@@ -7078,23 +7078,40 @@ async function cacheGet(k){ if(!cacheOK()) throw new Error("no-cache");
   const c=await caches.open(CACHE_NS); const r=await c.match(CACHE_BASE+k); return r? await r.text() : null; }
 async function cacheDel(k){ if(!cacheOK()) return;
   const c=await caches.open(CACHE_NS); await c.delete(CACHE_BASE+k); }
-/* ---------- 压缩：deflate-raw，几 MB 的存档一般压到几百 KB ---------- */
-const CAN_Z=(typeof CompressionStream!=="undefined" && typeof DecompressionStream!=="undefined");
+/* ---------- 压缩：几 MB 的存档一般压到几百 KB ----------
+   老内核（Chrome 80~102，如百度 App、部分国产浏览器）有 CompressionStream 但不认 "deflate-raw"，
+   构造时直接抛错——原来只判断有没有这个类，结果每次存档都在压缩这步失败、三层一层都没写。
+   现在按 deflate-raw → deflate → gzip 逐个试，用第一个能用的；压缩出任何错都降级成原文，绝不挡住存档。
+   封装头：Z1 deflate-raw / Z2 deflate / Z3 gzip / Z0 原文 / 无头 = 更老版本的裸 JSON */
+const Z_FMTS=[["Z1:","deflate-raw"],["Z2:","deflate"],["Z3:","gzip"]];
+const Z_HDR2FMT={"Z1:":"deflate-raw","Z2:":"deflate","Z3:":"gzip"};
+function zFmtOK(f){
+  if(typeof CompressionStream==="undefined" || typeof DecompressionStream==="undefined") return false;
+  try{ new CompressionStream(f); new DecompressionStream(f); return true; }catch(e){ return false; }
+}
+const Z_USABLE=Z_FMTS.filter(([h,f])=>zFmtOK(f));
+const CAN_Z=Z_USABLE.length>0;
 async function zipSave(str){
-  if(!CAN_Z) return "Z0:"+str;
-  const buf=await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer();
-  const b=new Uint8Array(buf); let out="";
-  for(let i=0;i<b.length;i+=8192) out+=String.fromCharCode.apply(null,b.subarray(i,i+8192));
-  return "Z1:"+out;
+  for(const [h,f] of Z_USABLE){
+    try{
+      const buf=await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream(f))).arrayBuffer();
+      const b=new Uint8Array(buf); let out="";
+      for(let i=0;i<b.length;i+=8192) out+=String.fromCharCode.apply(null,b.subarray(i,i+8192));
+      return h+out;
+    }catch(e){ /* 这个格式在本内核里跑不通，换下一个 */ }
+  }
+  return "Z0:"+str;
 }
 async function unzipSave(p){
   if(p==null) return null;
   const h=String(p).slice(0,3);
   if(h==="Z0:") return p.slice(3);
-  if(h!=="Z1:") return p;                       // 没有封装头 = 老版本的裸 JSON，直接用
+  const f=Z_HDR2FMT[h];
+  if(!f) return p;                              // 没有封装头 = 老版本的裸 JSON，直接用
+  if(!zFmtOK(f)) throw new Error("这台设备的浏览器不支持解压该存档（"+f+"），请在原设备导出存档文件再导入");
   const s=p.slice(3), b=new Uint8Array(s.length);
   for(let i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&255;
-  return await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+  return await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream(f))).text();
 }
 /* ---------- 存档指纹：正文和索引都被清掉时，靠它认出「曾经有过存档」---------- */
 const FPKEY="fmweb_save_fp";
@@ -7267,7 +7284,8 @@ async function storageSelfTest(onStep){
       log("Cache Storage",back===big,back===big?"写入 1MB 并读回一致":"写入后读回不一致或为空");
     }catch(e){ log("Cache Storage",false,"失败："+((e&&e.message)||e)); } }
 
-  log("压缩 deflate-raw",CAN_Z,CAN_Z?"可用，存档压缩后再落盘":"不可用，存档按原文落盘（体积约大 10 倍）");
+  { const st=Z_FMTS.map(([h,f])=>f+(zFmtOK(f)?" ✓":" ✗")).join("，");
+    log("存档压缩",CAN_Z,CAN_Z?`使用 ${Z_USABLE[0][1]}（${st}）`:`都不支持（${st}），存档按原文落盘（体积约大 8 倍）`); }
 
   try{
     if(navigator.storage&&navigator.storage.estimate){
