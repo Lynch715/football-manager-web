@@ -2331,7 +2331,7 @@ function createMatch(homeId, awayId, opts){
       });
     });
     M.teams.push({cid, club, men:arr, benchUsed:[], gk:arr.find(m=>m.pos==="GK")||arr[0],
-      form:club.tactic.formation, tac:club.tactic,
+      form:club.tactic.formation, tac:Object.assign({},club.tactic), tac0:Object.assign({},club.tactic),
       homeAdv: side===0 && !M.neutral ? 1.17 : 1});
   });
   M.ballOwner = M.teams[0].men.find(m=>m.pos==="MC")||M.teams[0].men[5];
@@ -2354,7 +2354,7 @@ function updatePositions(M){
       if(m.off) return;
       const prog=(bx-PW/2)*dir;              // 球在本方进攻方向的推进度
       const surge = (att && prog>12)? (prog-12)*(POS_SURGE[m.pos]||0) : 0;
-      let shift = prog*(att?0.42:0.46) + ment*PW*(att?1:0.5) + surge;
+      let shift = prog*(att?0.42:0.46) + ment*PW*(att?(ment>0?ENG.up:1):(ment<0?ENG.deep:ENG.upD)) + surge;
       // 门将跟随较少
       if(m.pos==="GK") shift = prog*0.10;
       let tx = m.bx + shift*dir;
@@ -2379,7 +2379,7 @@ function pressureOn(M, side, x, y){
     const d=Math.hypot(m.x-x,m.y-y);
     if(d<14) pr += (1-d/14)*(0.55+ (m.p.a.tackling+m.p.a.aggression+m.p.a.workrate)/120);
   });
-  return pr;
+  return pr*(1+(opp.tac.press-2)*ENG.prK);
 }
 function nearestOpp(M, side, x, y){
   const opp=M.teams[1-side]; let best=null,bd=1e9;
@@ -2387,7 +2387,12 @@ function nearestOpp(M, side, x, y){
     const d=Math.hypot(m.x-x,m.y-y); if(d<bd){bd=d;best=m;} });
   return {m:best,d:bd};
 }
-const att=(m,k)=> m.p.a[k]*(0.62+0.38*(m.cond/100));
+/* 2026-10 战术平衡：压上要有代价（身后空当 / 反击），收缩要有收益（封堵），逼抢和快节奏更耗体能。
+   ENG 里的系数是跑 1500 场对比调出来的，改之前先看 match_engine_tuning。*/
+const ENG={ctr:0.0061, ctrM:0.55, ctrP:0.19, ctrWin:2.0, blkM:0.08, onTM:0.06, tempoD:0.16, pressD:0.18, lowS:0.4, condK:0.014, pGoal:2.2, deep:1.2, up:1, upD:0.5, fwdB:0.005, shootB:1.04, prK:0.04};
+// 体能：75 以上影响很小，75 以下掉得快（高位逼抢踢满 90 分钟的队下半场会明显踢不动）
+function condF(c){ return c>=75? 1-(100-c)*0.004 : 0.9-(75-c)*ENG.condK; }
+const att=(m,k)=> m.p.a[k]*condF(m.cond);
 
 function addEvent(M,type,text,cls){
   const e={t:Math.floor(M.t), half:M.half, type, text, cls:cls||type, score:[...M.score]};
@@ -2403,8 +2408,10 @@ function stepMatch(M){
   const side=M.side, T=M.teams[side], O=M.teams[1-side];
   M.possTicks[side]++;
   // 体能消耗
-  const tempoF=0.85+T.tac.tempo*0.08, pressG=0.85+T.tac.press*0.09;
-  M.teams.forEach((tm,s)=>{ tm.men.forEach(m=>{ if(m.off)return;
+  M.teams.forEach((tm,s)=>{
+    const dT=tm.tac.tempo-2, dP=tm.tac.press-2;   // 往上加码掉体能多，往下收只省一点
+    const tempoF=1+dT*ENG.tempoD*(dT<0?ENG.lowS:1), pressG=1+dP*ENG.pressD*(dP<0?ENG.lowS:1);
+    tm.men.forEach(m=>{ if(m.off)return;
     m.mins += dt/60;
     const st=m.p.a.stamina, wr=m.p.a.workrate;
     let drain=(dt/60)*(0.30+ (20-st)*0.028 + wr*0.006)*(s===side?tempoF:pressG*1.05);
@@ -2413,6 +2420,7 @@ function stepMatch(M){
 
   const owner=M.ballOwner;
   if(!owner||owner.off){ M.ballOwner=T.men.find(m=>!m.off)||O.men[0]; }
+  if(M.ctr){ const cs=M.ctr-1; M.ctr=0; if(cs===side && doCounter(M,side)) return finPhase(M,dt); }
   const o=M.ballOwner;
   const dir = side===0?1:-1;
   const ax = side===0 ? o.x : PW-o.x;             // 进攻推进度 0..105
@@ -2439,7 +2447,7 @@ function stepMatch(M){
   wPass = 1.35*(0.5+A.passing/22)*(0.7+A.vision/30);
   if(pr>2.2) { wPass*=1.25; wDrib*=0.5; }
   if(T.tac.tempo>=3) { wPass*=1.05; wDrib*=0.95; }
-  if(T.tac.mentality>=3){ wShoot*=1.18; wCross*=1.1; }
+  if(T.tac.mentality>=3){ wShoot*=ENG.shootB; wCross*=1.1; }
   if(T.tac.mentality<=1){ wShoot*=0.8; wPass*=1.15; }
 
   const tot=wShoot+wCross+wDrib+wPass; let r=rnd()*tot, act;
@@ -2499,6 +2507,7 @@ function finPhase(M,dt){
     if(M.t>=90+M.addedTime) endMatch(M);
   }
   aiSubs(M);
+  aiTactics(M);
   return M.events[M.events.length-1];
 }
 function halftimeRecover(M){ M.teams.forEach(T=>T.men.forEach(m=>{ m.cond=clamp(m.cond+ri(3,7),0,100); })); }
@@ -2507,6 +2516,35 @@ function halftimeRecover(M){ M.teams.forEach(T=>T.men.forEach(m=>{ m.cond=clamp(
 function turnover(M, newOwner){
   M.side = M.teams[0].men.includes(newOwner)?0:1;
   M.ballOwner=newOwner; M.ball={x:newOwner.x,y:newOwner.y};
+  // 门将拿球不算（开大脚没有反击的突然性）；对手已经在前场拿球也不算
+  if(newOwner.pos!=="GK"){
+    const L=M.teams[1-M.side].tac, ax=M.side===0? newOwner.x : PW-newOwner.x;
+    if(ax<62){
+      const f=Math.max(0, 1 + (L.mentality-2)*ENG.ctrM*2 + (L.press-2)*ENG.ctrP*2);
+      const W=M.teams[M.side].tac;                     // 战术页「快速反击」没勾的队，拿球后不急着打身后
+      if(rnd()<ENG.ctr*f*(W.counter===false?0.6:1)) M.ctr=M.side+1;
+    }
+  }
+}
+// 快速反击：最快的前插球员和对方最慢的后卫赛跑，传球人得把球送到位
+function doCounter(M,side){
+  const T=M.teams[side], O=M.teams[1-side], o=M.ballOwner;
+  const runners=T.men.filter(m=>!m.off&&m!==o&&["ST","AM","ML","MR"].includes(m.pos));
+  const backs=O.men.filter(m=>!m.off&&POS_GRP[m.pos]==="df");
+  if(!runners.length||!backs.length) return false;
+  const spd=m=>att(m,'pace')*0.6+att(m,'accel')*0.4;
+  const run=runners.reduce((b,m)=>spd(m)>spd(b)?m:b), back=backs.reduce((b,m)=>spd(m)<spd(b)?m:b);
+  const pass=att(o,'passing')*0.5+att(o,'vision')*0.5;
+  const L=O.tac;
+  const av=spd(run)+ (pass-10)*0.35 + gauss(0,3.2);
+  const dv=spd(back)+ att(back,'positioning')*0.25 + (2-L.mentality)*1.6 + ENG.ctrWin + gauss(0,3.2);
+  addEvent(M,"ctr",`${C(T.cid).short} 打出快速反击`,"");
+  if(av<=dv){ turnover(M, back); M.ctr=0; return true; }
+  const dir=side===0?1:-1;
+  run.x = side===0? PW-11-rnd()*9 : 11+rnd()*9; run.y=PH/2+gauss(0,6);
+  M.ball={x:run.x,y:run.y}; M.ballOwner=run; M.lastTouch=o; o.keyp++; o.rating+=0.05;
+  doShot(M,side,run,Math.hypot((side===0?PW:0)-run.x,PH/2-run.y),Math.abs(run.y-PH/2),0.25,false);
+  return true;
 }
 function doPass(M,side,o,pr,dir){
   const T=M.teams[side];
@@ -2520,7 +2558,7 @@ function doPass(M,side,o,pr,dir){
     let w=(1+Math.max(0,fwd)*0.075) / (1+Math.abs(d-16)*0.055) / (1+oppPr*0.7);
     if(m.pos==="GK") w*=0.06;
     const axm=side===0?m.x:PW-m.x; if(axm>88) w*=0.55;
-    if(T.tac.mentality>=3) w*=(1+Math.max(0,fwd)*0.04);
+    if(T.tac.mentality>=3) w*=(1+Math.max(0,fwd)*ENG.fwdB);
     if(T.tac.tempo>=3&&fwd>18) w*=1.35;
     best=(w>bw)?(bw=w,m):best;
   });
@@ -2609,8 +2647,9 @@ function doShot(M,side,o,dist,dy,pr,isHeader){
   M.stats[side].xg+=xg;
   const fin=isHeader? att(o,'heading')*0.65+att(o,'jumping')*0.35 : att(o,'finishing')*0.7+att(o,'technique')*0.3;
   const comp=att(o,'composure');
-  let onTarget = clamp((0.20+fin*0.020+comp*0.006-dist*0.0092-pr*0.030)*0.93,0.06,0.76);   // 2026-09-12：场均 1.9 球太干，调到 ~2.5（再高顶级前锋一季 70+ 球）
-  const blocked = rnd()< clamp(pr*0.11,0,0.30);
+  const dm=M.teams[1-side].tac.mentality-2;            // 防守方心态：负数=收缩
+  let onTarget = clamp((0.20+fin*0.020+comp*0.006-dist*0.0092-pr*0.030)*0.93*(1+dm*ENG.onTM),0.06,0.76);   // 2026-09-12：场均 1.9 球太干，调到 ~2.5（再高顶级前锋一季 70+ 球）
+  const blocked = rnd()< clamp(pr*0.11 - dm*ENG.blkM,0,0.40);
   if(blocked){ addEvent(M,"blk",`${nm(o)} 的射门被封堵`,""); 
     if(rnd()<0.46) corner(M,side); else turnover(M, nearestOpp(M,side,o.x,o.y).m||gk); return; }
   if(rnd()>onTarget){
@@ -2621,7 +2660,7 @@ function doShot(M,side,o,dist,dy,pr,isHeader){
   o.sot++; M.stats[side].sot++;
   // 门将扑救
   const gkq=att(gk,'reflex')*0.45+att(gk,'handling')*0.2+att(gk,'oneonone')*0.2+att(gk,'positioning')*0.15;
-  let pGoal = clamp(xg*2.3*(0.70+fin*0.030)*(1.30-gkq*0.028),0.015,0.90);
+  let pGoal = clamp(xg*ENG.pGoal*(0.70+fin*0.030)*(1.30-gkq*0.028),0.015,0.90);
   pGoal *= M.teams[side].homeAdv;
   if(rnd()<pGoal){ scoreGoal(M,side,o,isHeader?"头球":dist>24?"远射":"射门"); }
   else{
@@ -2720,10 +2759,23 @@ function doSub(M,side,outMan,inPid){
   if(M.ballOwner===outMan) M.ballOwner=nm2;
   return true;
 }
+// 落后：70 分钟后压上；领先：最后 15 分钟收缩（弱队更愿意收）。只调一次。玩家现场观战时不碰玩家一方
+function aiTactics(M){
+  if(M.t<70) return;
+  M.teams.forEach((T,side)=>{
+    if(side===M.userSide && !M.autoUser && M.userTook) return;
+    if(T.adj) return;
+    const diff=M.score[side]-M.score[1-side], b=T.tac0||T.tac;
+    if(diff<0 && M.t>=70){ T.adj=1; if(rnd()<0.8){ T.tac.mentality=Math.min(4,b.mentality+2); T.tac.tempo=Math.min(4,b.tempo+1); } }
+    else if(diff>0 && M.t>=75){ T.adj=1;
+      const weaker = squadStrength(C(T.cid)) < squadStrength(C(M.teams[1-side].cid));
+      if(rnd()<(weaker?0.85:0.55)){ T.tac.mentality=Math.max(0,b.mentality-(weaker?2:1)); T.tac.press=Math.max(0,b.press-1); } }
+  });
+}
 function aiSubs(M){
   M.teams.forEach((T,side)=>{
-    // 玩家一方：直接看结果（M.autoUser）时完全托管；现场观战时只自动补上受伤离场的球员
-    const userLive = side===M.userSide && !M.autoUser;
+    // 玩家一方：没接管时助教照看（和直接跳过同一套逻辑）；亲自换过人或改过战术后，只自动补伤员
+    const userLive = side===M.userSide && !M.autoUser && M.userTook;
     if(!canSub(M,side)) return;
     if(M.t<55 && !T.men.some(m=>m.injured&&m.off&&!m.subDone)) return;
     // 受伤优先
@@ -7009,6 +7061,7 @@ function autoSubSuggest(){
 function applySubs(){
   const M=CURMATCH, side=M.userSide; let n=0;
   SUBQ.forEach(q=>{ if(!q.out.off && doSub(M,side,q.out,q.in)) n++; });
+  if(n) takeOver(M);
   toast(n? `完成 ${n} 次换人` : "换人失败：名额已用完", n?"":"bad");
   closeSubDialog();
 }
@@ -7017,6 +7070,7 @@ function closeSubDialog(){
   SUBQ=[]; SUBOUT=null; closeModal(); refreshMatchUI(true); drawPitch(1);
   if(SUBRESUME && CURMATCH && !CURMATCH.done){ SUBRESUME=false; toggleplay(true); }
 }
+function takeOver(M){ if(M && !M.userTook){ M.userTook=true; toast("你接管了临场指挥，助教不再自动换人和调整战术"); } }
 function tacDialog(){
   const M=CURMATCH, T=M.teams[M.userSide], t=T.tac;
   const opts=[["mentality","心态",MENTALITY],["tempo","节奏",TEMPO_N],["press","逼抢",PRESS_N],["width","宽度",WIDTH_N]];
@@ -7029,7 +7083,7 @@ function tacDialog(){
     const row=el("div"); row.style.marginBottom="10px";
     const lab=el("label","",`${n}：<b style="color:var(--acc)">${arr[t[k]]}</b>`);
     const r=el("input"); r.type="range"; r.min=0; r.max=4; r.value=t[k]; r.style.width="100%";
-    r.oninput=e=>{ t[k]=+e.target.value; lab.innerHTML=`${n}：<b style="color:var(--acc)">${arr[t[k]]}</b>`; };
+    r.oninput=e=>{ t[k]=+e.target.value; takeOver(M); lab.innerHTML=`${n}：<b style="color:var(--acc)">${arr[t[k]]}</b>`; };
     row.appendChild(lab); row.appendChild(r); box.appendChild(row);
   });
 }
