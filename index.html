@@ -1301,8 +1301,15 @@ function calcValue(p){
   if(p.injury>0) v*=0.82;
   return Math.max(3000, Math.round(v/1000)*1000);
 }
-function calcWage(p, rep){
-  let w = Math.pow(p.ca/10,3.0)*33 + rep*20;
+/* 联赛薪资系数（2026-10 v49）。工资公式原来不分联赛，德甲/法甲/意甲球队的工资按英超水平开、
+   营收却只有英超的一半多，开局八成球队超出董事会上限，只能靠租借凑阵容。
+   系数按「开局各联赛 现有年薪/目标上限 中位数 ≈ 0.95」校准，次序 = LEAGUE_DEFS（英超、英冠、英甲、西甲、西乙、意甲、意乙、德甲、德乙、法甲、法乙）。*/
+const LEAGUE_WAGE_F=[0.92, 0.97, 0.74, 0.84, 0.65, 0.69, 0.61, 0.59, 0.79, 0.53, 0.65];
+const EURO_WAGE_F=0.69;
+function wageF(c){ if(!c) return 1; if(c.nation===EURO_NATION) return EURO_WAGE_F;
+  const lg=lgIndex(c.nation,c.tier); return (lg>=0 && LEAGUE_WAGE_F[lg]!=null)? LEAGUE_WAGE_F[lg] : 1; }   // 建世界时 c.lg 还没设，按 nation/tier 现算
+function calcWage(p, rep, club){
+  let w = (Math.pow(p.ca/10,3.0)*33 + rep*20) * wageF(club);
   if(p.age<21) w*=0.5; else if(p.age<24) w*=0.82; else if(p.age>33) w*=0.85;
   return Math.max(300, Math.round(w/50)*50);   // 周薪 £
 }
@@ -1414,7 +1421,9 @@ function makeRealPlayer(row, clubId){
     pos, pos2:[...pos2], age, clubId, nat:natCN, rg:(club&&NATIONS[club.nation])?NATIONS[club.nation].rg:"eng",
     a:A, ca:calcCA(A,pos), ca0:calcCA(A,pos), pa:Math.max(overall,potential)*2,
     condition:100, morale:ri(60,88), injury:0, injType:"", sharp:ri(70,95),
-    contract:WORLD.season+2, wage:0, value:0,
+    // 合同年限打散到 1~4 年（33 岁以上 0~2 年）。原来一律 +2，开局没人到期、第二季末三千多名真实球员同时到期；
+    // 也不放 0 年：最后一年合同身价只剩一成多，开局会有一批球星 £3M 就能买走
+    contract:WORLD.season+(age>32? ri(0,2) : ri(1,4)), wage:0, value:0,
     apps:0, goals:0, assists:0, cleanSheet:0, ratingSum:0, motm:0, yellow:0, red:0, susp:0,
     careerApps:0, careerGoals:0,
     scouted:0, homegrown:false, form:[], realData:true
@@ -1422,7 +1431,7 @@ function makeRealPlayer(row, clubId){
   p.pa=Math.max(p.pa,p.ca); p.prof=genProf();
   // 副位置去掉与主位置相同的项
   p.pos2=p.pos2.filter(x=>x!==pos);
-  p.wage=calcWage(p,club?club.rep:50); p.value=calcValue(p);
+  p.wage=calcWage(p,club?club.rep:50,club); p.value=calcValue(p);
   return p;
 }
 // 真实名单人数不足（有的队只有 15 人）时，用生成球员补足替补深度
@@ -1433,7 +1442,7 @@ function topUpSquad(club){
     const lvl=clamp(gauss(rep*0.70+4, 5), 8, 90);        // 替补级别
     const r=rnd(); const age = r<0.35? ri(18,21) : r<0.75? ri(22,26) : ri(27,31);
     const p=makePlayer(lvl,pos,age,club.id);
-    p.wage=calcWage(p,rep); p.value=calcValue(p);
+    p.wage=calcWage(p,rep,club); p.value=calcValue(p);
     if(age<=21 && rnd()<0.6) p.homegrown=true;
     WORLD.players[p.id]=p; club.squad.push(p.id);
   };
@@ -1472,7 +1481,7 @@ function genSquad(club){
       const r=rnd();
       age = r<0.10? ri(17,19) : r<0.34? ri(20,23) : r<0.72? ri(24,28) : r<0.92? ri(29,32) : ri(33,36);
       const p=makePlayer(lvl,pos,age,club.id);
-      p.wage=calcWage(p,rep); p.value=calcValue(p);
+      p.wage=calcWage(p,rep,club); p.value=calcValue(p);
       if(rnd()<0.3) p.homegrown=true;
       WORLD.players[p.id]=p; ids.push(p.id);
       idx++;
@@ -1490,7 +1499,7 @@ function newWorld(seed, userClubEn){
   WORLD={
     ver:2, pid:0, seed, season:2026, day:0, date:null,
     players:{}, clubs:[], leagues:[], cups:[], euro:null, euroQual:null,
-    userClub:0, news:[], inbox:[], transferLog:[], history:[],
+    userClub:0, news:[], inbox:[], transferLog:[], history:[], wageLF:1, ctrSpread:1,
     freeAgents:[], scoutReports:[], shortlist:[],
     settings:{speed:1, autoSub:true},
     started:false
@@ -1605,12 +1614,20 @@ function compLabel(f){
 function compTagCls(f){ return f.comp==="L"?"t-i": (f.comp==="C"||f.comp==="PO"?"t-w":"t-eu"); }
 const C = id => WORLD.clubs[id];
 const UC = () => WORLD.clubs[WORLD.userClub];
+/* 显示货币。游戏内部一律按英镑记账，这里只做显示换算；设置存在本机。*/
+const CUR_DEF={GBP:{sym:"£",r:1,n:"英镑"}, EUR:{sym:"€",r:1.17,n:"欧元"}};
+let CUR=(()=>{ try{ const v=localStorage.getItem("fm_cur"); return CUR_DEF[v]? v : "GBP"; }catch(e){ return "GBP"; } })();
+const CURSYM=()=>CUR_DEF[CUR].sym;
+const toCurIn=x=>Math.round((+x||0)*CUR_DEF[CUR].r);       // 内部英镑 → 输入框里显示的数
+const fromCur=v=>(+v||0)/CUR_DEF[CUR].r;                   // 输入框里的数 → 内部英镑
+function setCurrency(k){ if(!CUR_DEF[k]) return; CUR=k; try{ localStorage.setItem("fm_cur",k); }catch(e){} render(); toast(`货币已切换为${CUR_DEF[k].n}`); }
 function money(n){
-  const a=Math.abs(n), s=n<0?"-":"";
-  if(a>=1e9) return s+"£"+(a/1e9).toFixed(2)+"B";
-  if(a>=1e6) return s+"£"+(a/1e6).toFixed(a>=1e7?1:2)+"M";
-  if(a>=1e3) return s+"£"+Math.round(a/1e3)+"K";
-  return s+"£"+Math.round(a);
+  n=(+n||0)*CUR_DEF[CUR].r;
+  const a=Math.abs(n), s=n<0?"-":"", y=CURSYM();
+  if(a>=1e9) return s+y+(a/1e9).toFixed(2)+"B";
+  if(a>=1e6) return s+y+(a/1e6).toFixed(a>=1e7?1:2)+"M";
+  if(a>=1e3) return s+y+Math.round(a/1e3)+"K";
+  return s+y+Math.round(a);
 }
 function ovr(p){ return Math.round(p.ca/2); }   // 0-100 概览值
 function caColor(ca){
@@ -1987,8 +2004,10 @@ function advanceCupRound(cup){
     w.trophies.push(WORLD.season+" "+cup.name);
     addMoney(w, cupPrize(cup,5), cup.name+"冠军奖金");
     w.board.conf=clamp(w.board.conf+15,0,100);
-    if(w.id===WORLD.userClub) news(`${cup.name}冠军！`,`${w.cn} 捧起了 ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季的${cup.name}！`,"good");
-    else if(NATIONS[cup.nation] && UC().nation===cup.nation) news(`${cup.name}决赛`,`${w.cn} 夺得本赛季${cup.name}冠军。`,"info");
+    const ff=ms.find(f=>f.played && (f.home===w.id||f.away===w.id));
+    const fl=ff? finalLine(ff)+"，" : "";
+    if(w.id===WORLD.userClub) news(`${cup.name}冠军！`,`${fl}${w.cn} 捧起了 ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季的${cup.name}！`,"good");
+    else if(NATIONS[cup.nation] && UC().nation===cup.nation) news(`${cup.name}决赛`,`${fl}${w.cn} 夺得本赛季${cup.name}冠军。`,"info");
     return;
   }
   if(cup.cur<6) scheduleCupRound(cup);
@@ -2155,7 +2174,11 @@ function euroFinish(E, fx){
   C(w).board.conf=clamp(C(w).board.conf+ (E.code==="CL"?40:25),0,100);
   C(w).euro=null; C(l).euro=null;
   if(w===WORLD.userClub) news(`${E.name}冠军！！`,`${C(w).cn} 登上欧洲之巅，捧起${E.name}奖杯！`,"good");
-  else news(`${E.name}决赛`,`${C(w).cn} ${fx.hg}-${fx.ag} ${C(l).cn}${fx.pens?`（点球 ${fx.pens[0]}-${fx.pens[1]}）`:""}，${C(w).cn} 夺冠。`,"info");
+  else news(`${E.name}决赛`,`${finalLine(fx)}，${C(w).cn} 夺冠。`,"info");
+}
+// 决赛比分一律按「主队 比分 客队」写，点球同样按主客顺序（原来按冠军在前写，冠军是客队时比分就反了）
+function finalLine(fx){
+  return `${C(fx.home).cn} ${fx.hg}-${fx.ag} ${C(fx.away).cn}${fx.pens?`（点球 ${fx.pens[0]}-${fx.pens[1]}）`:""}`;
 }
 // 每日收尾：推进各项杯赛
 function competitionsDayEnd(day){
@@ -2389,7 +2412,8 @@ function nearestOpp(M, side, x, y){
 }
 /* 2026-10 战术平衡：压上要有代价（身后空当 / 反击），收缩要有收益（封堵），逼抢和快节奏更耗体能。
    ENG 里的系数是跑 1500 场对比调出来的，改之前先看 match_engine_tuning。*/
-const ENG={ctr:0.0061, ctrM:0.55, ctrP:0.19, ctrWin:2.0, blkM:0.08, onTM:0.06, tempoD:0.16, pressD:0.18, lowS:0.4, condK:0.014, pGoal:2.2, deep:1.2, up:1, upD:0.5, fwdB:0.005, shootB:1.04, prK:0.04};
+/* v49：门将/中卫不再按全场跑动掉体能后，疲劳门将送的球没了，pGoal 2.2→2.6 把场均进球拉回原水平（3000 场 2.45→2.49）。*/
+const ENG={ctr:0.0061, ctrM:0.55, ctrP:0.19, ctrWin:2.0, blkM:0.08, onTM:0.06, tempoD:0.16, pressD:0.18, lowS:0.4, condK:0.014, pGoal:2.6, deep:1.2, up:1, upD:0.5, fwdB:0.005, shootB:1.04, prK:0.04};
 // 体能：75 以上影响很小，75 以下掉得快（高位逼抢踢满 90 分钟的队下半场会明显踢不动）
 function condF(c){ return c>=75? 1-(100-c)*0.004 : 0.9-(75-c)*ENG.condK; }
 const att=(m,k)=> m.p.a[k]*condF(m.cond);
@@ -2400,6 +2424,8 @@ function addEvent(M,type,text,cls){
 }
 function nm(m){ return m.p.cn.split("·")[1]||m.p.cn; }
 
+/* 位置跑动量。原来体能消耗只看耐力/积极性，门将耐力属性普遍很低，于是门将掉得最快、中卫其次。*/
+const POS_RUN={GK:0.35, DC:0.80, DL:1.05, DR:1.05, DM:1.05, MC:1.05, ML:1.05, MR:1.05, AM:1.00, ST:0.95};
 // ---------- 主循环：推进一个回合 ----------
 function stepMatch(M){
   if(M.done) return null;
@@ -2414,7 +2440,9 @@ function stepMatch(M){
     tm.men.forEach(m=>{ if(m.off)return;
     m.mins += dt/60;
     const st=m.p.a.stamina, wr=m.p.a.workrate;
-    let drain=(dt/60)*(0.30+ (20-st)*0.028 + wr*0.006)*(s===side?tempoF:pressG*1.05);
+    // 位置只折算基础跑动；战术加码（快节奏/高逼抢）的额外消耗外场球员一样吃，否则压上的代价被变相打折
+    const mult=(s===side?tempoF:pressG*1.05), pr=POS_RUN[m.pos]||1;
+    let drain=(dt/60)*(0.30+ (20-st)*0.028 + wr*0.006)*(m.pos==="GK"? pr*mult : Math.max(0.2, pr+mult-1));
     m.cond=clamp(m.cond-drain,12,100);
   }); });
 
@@ -3145,7 +3173,7 @@ function windowName(){ const m=dateOf(WORLD.day).getMonth()+1; return m===8?"夏
    都通过 balance / weeklyWages 自动反映，不需要任何地方手工加减存量字段。 */
 const BAL_RELEASE = 0.35;                       // 赛季初余额释放比例。校准项 C3：管豪门，0.42 时曼城 8 季后 avail 顶到 £220M
 const OPEX_RATE   = 0.20;                       // 营收中视为运营留存、不可用于阵容的比例（不真扣现金）
-const WAGE_CAP    = {0:0.75, 1:0.85, 2:0.90};   // 下季承诺工资 / 预计营收 上限，按 tier；欧战散队 tier 0
+const WAGE_CAP    = {0:0.85, 1:0.92, 2:0.95};   // 下季承诺工资 / 预计营收 上限，按 tier；欧战散队 tier 0
 const CAP_RATCHET = 0.94;                       // 过渡棘轮：已超 k×rev0 的队，上限按赛季初现有工资的 94% 核定（每季至少压 6%）
 function wageCapK(c){ const k=WAGE_CAP[c.tier]; return k==null? 0.90 : k; }
 
@@ -3172,7 +3200,7 @@ const REV_RANK = 1;   // 1 = 名次奖金按上季名次估；0 = 一律按倒�
    于是这些队的工资天然顶破按 rev0 算的 cap。改成按「上季名次」估——
    这是「接近确定」的量，再打 0.85 的保守折，仍然是往低估。*/
 function endPrize(c){
-  const lg=LG(c); if(!lg) return Math.pow(c.rep,3)*45;
+  const lg=LG(c); if(!lg) return Math.pow(c.rep,3)*EURO_TV_K;
   const [hi,lo]=lg.prize, n=Math.max(2, lg.clubIds.length);
   if(!REV_RANK) return lo*0.5;
   let rank;
@@ -3186,10 +3214,16 @@ function revOf(c, R){
   const lg=LG(c), cap=c.cap||0;
   const att=Math.round(Math.min(cap, cap*(0.55 + c.rep/220 + 0.06)));    // 场均积分按 1.0 保守估
   v=Math.round(Math.pow(c.rep,3)*2*R.mon                                  // 商业赞助
-    + (lg? lg.prize[1]*0.5/10 : Math.pow(c.rep,3)*45/10)*R.tv             // 月度转播
+    + (lg? lg.prize[1]*0.5/10 : (Math.pow(c.rep,3)*EURO_TV_K + (c.nation===EURO_NATION? euroDomesticGate(c) : 0))/10)*R.tv   // 月度转播（外围队含本国联赛门票）
     + (R.home.get(c.id)||0)*att*ticketPrice(c)                            // 联赛主场门票（杯赛/欧战不算）
-    + endPrize(c));                                                       // 赛季末名次奖金
+    + endPrize(c)                                                         // 赛季末名次奖金
+    + (R===REV_S? euroExpected(c) : 0));                                  // 已确定的欧战收入（只进整季预测 rev0）
   R.m.set(c.id,v); return v;
+}
+/* 赛季初已经拿到欧冠/欧联资格的队：参赛奖金 + 按小组赛两胜一平估的奖金，打 0.85 折。*/
+function euroExpected(c){
+  const E=c.euro && EURO_COMPS[c.euro]; if(!E) return 0;
+  const z=E.prize; return Math.round((z.enter + 2*z.win + z.draw)*0.85);
 }
 let REV_R={key:""}, REV_S={key:""};
 function revRemain(c){                            // 本季剩余
@@ -3336,9 +3370,11 @@ function askingPrice(p){
 }
 // 必须是确定性的：报价弹窗里展示的要求，与提交时校验的要求要完全一致
 function wageDemand(p, club){
-  const w=calcWage(p, club.rep);
+  const w=calcWage(p,club.rep,club);
   const h=(hashStr(p.id+"|"+club.id+"|"+p.contract)%1000)/1000;
-  return Math.round(Math.max(p.wage*1.06, w*(0.95+h*0.35))/50)*50;
+  const own=p.clubId>=0? C(p.clubId) : null;
+  const k=own? clamp(wageF(club)/wageF(own),0.6,1) : 1;          // 去薪资水平更低的联赛，现薪地板跟着打折
+  return Math.round(Math.max(p.wage*1.06*k, w*(0.95+h*0.35))/50)*50;
 }
 function squadNeed(club){
   // 返回最薄弱的位置
@@ -3977,12 +4013,12 @@ function counterOffer(i){
   const sug=Math.round(of.fee*1.2/1e4)*1e4;
   openModal("向 "+esc(b.cn)+" 还价",
     `<div class="hint">${esc(b.cn)} 当前报价 <b style="color:var(--acc)">${money(of.fee)}</b>（${esc(p.cn)} 身价 ${money(p.value)}）。<br>每份报价只能还价一次：要价在对方承受范围内会被直接接受；略高时对方可能给出最终报价；过高则对方退出谈判。</div>
-     <div style="margin-top:12px"><label>你的要价（£）</label><input id="co-fee" type="number" value="${sug}" style="width:180px"></div>`,
+     <div style="margin-top:12px"><label>你的要价（${CURSYM()}）</label><input id="co-fee" type="number" value="${toCurIn(sug)}" style="width:180px"></div>`,
     `<button class="pri" onclick="submitCounter(${i})">发出还价</button><button onclick="closeModal()">取消</button>`);
 }
 function submitCounter(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
-  const v=+$("#co-fee").value; if(!(v>of.fee)){ toast("要价需高于当前报价","bad"); return; }
+  const v=fromCur($("#co-fee").value); if(!(v>of.fee)){ toast("要价需高于当前报价","bad"); return; }
   of.countered=true;
   const max=of.max||Math.round(of.fee*1.2);
   if(v<=max){ of.fee=Math.round(v/1000)*1000; of.until=Math.min(WORLD.day+7, windowEndDay()); toast(`${b.cn} 接受了你 ${money(of.fee)} 的要价`); }
@@ -4063,7 +4099,7 @@ function makeWonderkid(clubId){
   p.wonderkid=true;
   if(clubId>=0){
     const c=C(clubId);
-    p.wage=Math.max(300,Math.round(calcWage(p,c.rep)*0.5/50)*50);
+    p.wage=Math.max(300,Math.round(calcWage(p,c.rep,c)*0.5/50)*50);
     p.contract=WORLD.season+ri(2,4);
     WORLD.players[p.id]=p; c.squad.push(p.id);
   }else{
@@ -4308,7 +4344,7 @@ function spawnLegendYouths(){
     const uc=cands.find(x=>x.id===WORLD.userClub);
     const c=(uc&&rnd()<0.18)? uc : pick(cands);
     const p=makeLegendYouth(c.id,16,17); if(!p) return;
-    p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep)*0.35/50)*50); p.contract=WORLD.season+3;
+    p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep,c)*0.35/50)*50); p.contract=WORLD.season+3;
     WORLD.players[p.id]=p; c.squad.push(p.id); p.value=calcValue(p);
     if(c.id===WORLD.userClub)
       news("青训营的惊喜",`青训主管特别提到一名叫 ${p.cn}（${POS_CN[p.pos]}，${p.age}岁，${p.nat}）的少年："我从没见过这样的天赋。"`,"good");
@@ -4336,7 +4372,7 @@ function youthIntake(){
       const bonus = 20 + Math.pow(rnd(),2.3)*85 + c.youthRating*1.2;
       const capPA = 108 + c.youthRating*3.4;   // 20 级青训营天花板 176(≈88)，8 级只有 135(≈67)
       p.pa=clamp(Math.round(p.ca+bonus), p.ca, Math.min(200, Math.round(capPA)));
-      p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep)*0.35/50)*50);
+      p.homegrown=true; p.wage=Math.max(250,Math.round(calcWage(p,c.rep,c)*0.35/50)*50);
       p.contract=WORLD.season+3;
       WORLD.players[p.id]=p; c.squad.push(p.id); arr.push(p);
     }
@@ -4378,7 +4414,7 @@ function aiRenewDecide(c, p){
   if(rnd()>=pr) return false;
   // 钱：新合同要占得下工资空间（只算涨薪的增量，他现在的工资已经在 wageBill 里）。
   // 占不下就是真的「续不起」——这才是有据可查的少数情况。
-  const want=Math.max(p.wage, calcWage(p,c.rep));
+  const want=Math.max(p.wage, calcWage(p,c.rep,c));
   const extra=(want-p.wage)*52;
   /* 同 doRenew：提前续约（contract > season）算增量，到期续约（contract <= season）算全额。
      前者原薪免检没问题，后者免检就等于每季把到期的人白送回下季承诺。*/
@@ -4399,7 +4435,7 @@ function aiExtendContracts(){
       if(rnd() >= (left===1? 0.55 : 0.22)) return;
       if(!aiRenewDecide(c,p)) return;
       p.contract=WORLD.season+ri(3,5);
-      p.wage=Math.max(p.wage, calcWage(p,c.rep));
+      p.wage=Math.max(p.wage, calcWage(p,c.rep,c));
     });
   });
 }
@@ -4504,6 +4540,7 @@ function endSeason(){
   aiExtendContracts();          // 先谈提前续约，再处理到期合同
 
   // 年龄 / 合同 / 退役
+  const leftUser=[];
   Object.values(WORLD.players).forEach(p=>{
     p.age++;
     prospectFate(p);
@@ -4518,18 +4555,20 @@ function endSeason(){
     }
     if(p.contract<=WORLD.season && p.clubId>=0){
       const c=C(p.clubId);
-      if(c.id!==WORLD.userClub || rnd()<0.5){
+      if(c.id!==WORLD.userClub){
         // AI 自动续约 / 放走
-        if(aiRenewDecide(c,p)){ p.contract=WORLD.season+1+ri(1,4); p.wage=Math.max(p.wage, calcWage(p,c.rep)); }
+        if(aiRenewDecide(c,p)){ p.contract=WORLD.season+1+ri(1,4); p.wage=Math.max(p.wage, calcWage(p,c.rep,c)); }
         else toFreeAgent(p, c);
       } else {
+        // 玩家的人一律由玩家决定：赛季中已经提醒过三次，没续就走（原来有一半会被按 AI 逻辑偷偷续约）
+        leftUser.push(`${p.cn}（${POS_CN[p.pos]}，${p.age-1}岁，能力 ${ovr(p)}）`);
         toFreeAgent(p, c);
-        news(`${p.cn} 合同到期离队`,`${p.cn} 的合同已经到期并自由转会离开。`,"warn");
       }
     }
     p.condition=ri(70,92); p.sharp=ri(45,70); p.injury=0; p.susp=0;
     p.value=calcValue(p);
   });
+  if(leftUser.length) news(`${leftUser.length} 名球员合同到期离队`,`以下球员合同到期，已以自由身离开：\n${leftUser.join("\n")}`,"warn");
   // AI 补强阵容
   WORLD.clubs.forEach(c=>{
     let guard=0;
@@ -4554,7 +4593,7 @@ function endSeason(){
         const top=good.slice(0, Math.min(good.length,6));
         const start=Math.floor(Math.pow(rnd(),1.6)*top.length);   // 偏向能力高的那头起手
         for(let t=0;t<top.length && !signed;t++){
-          const id=top[(start+t)%top.length], w=calcWage(P(id), c.rep);
+          const id=top[(start+t)%top.length], w=calcWage(P(id),c.rep,c);
           if(!aiAffordWage(c, w*52, 0) && !faReliefOK(c, P(id), w*52)) continue;   // 付不起就顺延；人数不足 18 走保底闸
           // 这里跑在 WORLD.season++ 之前，年限要 +1，否则 ri(1,3) 实际只剩 0~2 年（一半人下季末又到期）
           transferPlayer(id, c.id, 0, w, 1+ri(1,3));
@@ -4563,7 +4602,7 @@ function endSeason(){
       }
       if(!signed){
         const p=makePlayer(clamp(gauss(c.rep*0.9,7),8,95), usePos, ri(18,29), c.id);
-        p.wage=calcWage(p,c.rep); p.value=calcValue(p); p.contract=WORLD.season+1+ri(1,4);
+        p.wage=calcWage(p,c.rep,c); p.value=calcValue(p); p.contract=WORLD.season+1+ri(1,4);
         WORLD.players[p.id]=p; c.squad.push(p.id);
       }
     }
@@ -4644,7 +4683,7 @@ function bridgeTiers(moves){
         const need=squadNeed(c);
         const lvl=clamp(Math.round(target/1.85+ri(-3,3)),8,96);
         const p=makePlayer(lvl, need.pos, ri(23,29), c.id);
-        p.wage=calcWage(p,c.rep); p.value=calcValue(p); p.contract=WORLD.season+ri(2,4); p.joinedAbs=absDay();
+        p.wage=calcWage(p,c.rep,c); p.value=calcValue(p); p.contract=WORLD.season+ri(2,4); p.joinedAbs=absDay();
         WORLD.players[p.id]=p; c.squad.push(p.id); assignNumber(c,p); added++;
         if(c.squad.length>28){
           const worst=c.squad.map(i=>P(i)).filter(q=>!q.loan).sort((a,b)=>a.ca-b.ca)[0];
@@ -4705,8 +4744,28 @@ function simDay(day, skipUser){
   competitionsDayEnd(day);
 }
 
+/* 合同到期提醒：开季、冬窗开启、最后一轮联赛前两周各一次。只列还没续约的。*/
+function contractReminder(stage){
+  const u=UC(); if(!u) return;
+  const R=WORLD.ctrRem||(WORLD.ctrRem={});
+  const key=WORLD.season+"_"+stage; if(R[key]) return; R[key]=1;
+  const exp=u.squad.map(P).filter(p=>p && !p.loan && p.contract<=WORLD.season)
+    .concat((u.loanedOut||[]).map(P).filter(p=>p && p.contract<=WORLD.season))
+    .sort((a,b)=>b.ca-a.ca);
+  if(!exp.length) return;
+  const lines=exp.map(p=>`${p.cn}（${POS_CN[p.pos]}，${p.age}岁，能力 ${ovr(p)}，周薪 ${money(p.wage)}${p.loan?"，外租中":""}）`).join("\n");
+  const tail="\n\n在球员档案里点「续约」谈新合同；不续约的球员会在赛季结束后以自由身离队。阵容页的「即将到期」可以一次看全。";
+  if(stage==="start") news(`本赛季有 ${exp.length} 名球员合同到期`,`以下球员的合同将在本赛季结束时到期：\n${lines}${tail}`,"warn");
+  else if(stage==="winter") news(`合同提醒：还有 ${exp.length} 人未续约`,`冬窗已开。以下球员合同本季到期，至今仍未续约：\n${lines}${tail}`,"warn");
+  else news(`最后提醒：${exp.length} 名球员即将合同到期`,`距离本赛季最后一轮联赛还有两周。以下球员如果不续约，赛季结束后将以自由身离队：\n${lines}${tail}`,"bad");
+}
+function lastFixtureDay(){ let m=0; (WORLD.fixtures||[]).forEach(f=>{ if(f.comp==="L" && f.day>m) m=f.day; }); return m; }   // 联赛赛程开季就排定，杯赛/欧战后几轮是晋级后才排的
 function processDayEnd(day){
   dailyTick();
+  { const dt0=dateOf(day);
+    if(day===0) contractReminder("start");
+    if(dt0.getMonth()===0 && dt0.getDate()===1) contractReminder("winter");
+    const lf=lastFixtureDay(); if(lf>20 && day>=lf-14) contractReminder("final"); }
   if(inTransferWindow()) marketDaily();
   faSigningRound();                 // 自由球员不受转会窗限制，全年都跑
   const dt=dateOf(day);
@@ -5010,7 +5069,7 @@ function vHome(v){
       <b style="color:${m.cat==='bad'?'#e5484d':m.cat==='good'?'#00d47e':m.cat==='warn'?'#f0a020':'#e6edf3'}">${esc(m.title)}</b>
       <span class="hint" style="float:right">${fmtDateShort(dateOf(m.d))}</span>
       <div class="hint" style="margin-top:2px">${esc(m.body.slice(0,80))}${m.body.length>80?"…":""}</div></div>`);
-    d.onclick=()=>{m.read=true; openModal(esc(m.title), `<div style="line-height:1.7">${esc(m.body)}</div>`); render();};
+    d.onclick=()=>{m.read=true; openModal(esc(m.title), `<div style="line-height:1.7;white-space:pre-line">${esc(m.body)}</div>`); render();};
     nw.appendChild(d);
   });
   v.appendChild(nw);
@@ -5040,7 +5099,7 @@ function vSquad(v){
   const c=UC();
   v.appendChild(el("div","",`<h1>一线队阵容</h1><div class="sub">${c.squad.length} 名球员 · 周薪总额 ${money(c.squad.reduce((s,i)=>s+P(i).wage,0))} · 阵容总价值 ${money(c.squad.reduce((s,i)=>s+P(i).value,0))}</div>`));
   const bar=el("div","chipgrid"); bar.style.cssText="margin-bottom:10px";
-  [["all","全部"],["gk","门将"],["df","后卫"],["mf","中场"],["fw","前锋"],["inj","伤停"],["young","U21"]].forEach(([k,n])=>{
+  [["all","全部"],["gk","门将"],["df","后卫"],["mf","中场"],["fw","前锋"],["inj","伤停"],["young","U21"],["exp","即将到期"]].forEach(([k,n])=>{
     const b=el("button","sm"+(SQUADFILTER===k?" on":""),n);
     b.onclick=()=>{SQUADFILTER=k;render();}; bar.appendChild(b);
   });
@@ -5052,6 +5111,7 @@ function vSquad(v){
   let rows=c.squad.map(i=>P(i));
   if(SQUADFILTER==="inj") rows=rows.filter(p=>p.injury>0||p.susp>0);
   else if(SQUADFILTER==="young") rows=rows.filter(p=>p.age<=21);
+  else if(SQUADFILTER==="exp") rows=rows.filter(p=>p.contract<=WORLD.season);
   else if(SQUADFILTER!=="all") rows=rows.filter(p=>POS_GRP[p.pos]===SQUADFILTER);
   const inXI=id=>c.lineup.includes(id), inSub=id=>c.subs.includes(id);
   if(!SORT.k){ SORT.k="ca"; SORT.d=-1; }
@@ -5430,12 +5490,12 @@ function loanCounterDialog(i){
      <div style="margin-top:10px"><label>对方承担工资</label><div class="ctl"><select id="lc-share">${opt(1,of.wageShare,"100%")}${opt(0.5,of.wageShare,"50%")}${opt(0,of.wageShare,"0%（我方全付）")}</select></div></div>
      <div style="margin-top:8px"><label>租期</label><div class="ctl"><select id="lc-half">${opt(0,of.half?1:0,"至赛季末")}${windowName()==="夏窗"?opt(1,of.half?1:0,"至冬窗（半季）"):""}</select></div></div>
      <div style="margin-top:8px"><label>出场条款</label><div class="ctl"><select id="lc-min">${opt(0,of.minApps,"不要求")}${opt(0.6,of.minApps,"≥60%")}${opt(0.8,of.minApps,"≥80%")}</select></div></div>
-     <div style="margin-top:8px"><label>租借费（£）</label><input id="lc-fee" type="number" value="${of.fee||0}" style="width:160px"></div>`,
+     <div style="margin-top:8px"><label>租借费（${CURSYM()}）</label><input id="lc-fee" type="number" value="${toCurIn(of.fee||0)}" style="width:160px"></div>`,
     `<button class="pri" onclick="submitLoanCounter(${i})">发回条款</button><button onclick="closeModal()">取消</button>`);
 }
 function submitLoanCounter(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
-  const t={wageShare:+$("#lc-share").value, half:$("#lc-half").value==="1", minApps:+$("#lc-min").value, fee:Math.max(0,Math.round((+$("#lc-fee").value||0)/1e4)*1e4)};
+  const t={wageShare:+$("#lc-share").value, half:$("#lc-half").value==="1", minApps:+$("#lc-min").value, fee:Math.max(0,Math.round(fromCur($("#lc-fee").value)/1e4)*1e4)};
   of.countered=true;
   let hard=0;
   if(t.wageShare>of.wageShare) hard++;
@@ -5881,8 +5941,8 @@ function makeBid(pid){
        : `<div class="hint">对方要价约 <b style="color:var(--acc)">${money(ask)}</b>，球员周薪要求约 <b>${money(wg)}</b>${p.listed?'　<span class="tag t-w">他被挂牌，卖方有出售意愿</span>':''}<br>可以尝试压价，对方最多还一次价；再谈不拢本窗就不谈了。</div>`}
      ${(!isFA&&(perfIndex(p)>=0.35||(p.clubId>=0&&p.ca>C(p.clubId).rep*1.9)))?'<div class="hint" style="margin-top:6px;color:var(--warn)">该球员是市场热门，报价若仅略高于要价，可能被其他俱乐部截胡；高出要价 8% 以上更稳妥。</div>':''}
      ${isFA? '<input id="bid-fee" type="hidden" value="0">'
-           : `<div style="margin-top:12px"><label>转会费（£）</label><input id="bid-fee" type="number" value="${ask}" style="width:180px"></div>`}
-     <div style="margin-top:8px"><label>周薪（£）</label><input id="bid-wage" type="number" value="${wg}" style="width:180px"></div>
+           : `<div style="margin-top:12px"><label>转会费（${CURSYM()}）</label><input id="bid-fee" type="number" value="${toCurIn(ask)}" style="width:180px"></div>`}
+     <div style="margin-top:8px"><label>周薪（${CURSYM()}）</label><input id="bid-wage" type="number" value="${toCurIn(wg)}" style="width:180px"></div>
      <div style="margin-top:8px"><label>合同年限</label><select id="bid-yr" onchange="updBidCost()"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
      <div class="hint" id="bid-nego" style="margin-top:10px"></div>
      <div class="hint" id="bid-cost" style="margin-top:12px"></div>`,
@@ -5895,7 +5955,7 @@ function makeBid(pid){
 /* 报价弹窗底部那行：这笔合同本季占用多少、之后每季多少。合同年限一变就重算。*/
 function updBidCost(){
   const box=$("#bid-cost"); if(!box) return;
-  const c=UC(), fee=+(($("#bid-fee")||{}).value||0), wg=+(($("#bid-wage")||{}).value||0), yr=+(($("#bid-yr")||{}).value||3);
+  const c=UC(), fee=fromCur(($("#bid-fee")||{}).value||0), wg=fromCur(($("#bid-wage")||{}).value||0), yr=+(($("#bid-yr")||{}).value||3);
   const wks=remWeeks(c), av=avail(c), now=fee+wg*52*wks/52, cn=committedNext(c), cap=wageCap(c);
   const r=canAfford(c, fee, wg*52);
   box.innerHTML=`可用资金 <b style="color:${av>=0?"var(--acc)":"var(--bad)"}">${money(av)}</b>。`
@@ -5920,7 +5980,7 @@ function submitBid(pid){
   const isFA = p.clubId<0;
   if(!isFA && !inTransferWindow()){ toast("当前不在转会窗口","bad"); closeModal(); return; }
   if(p.loan){ toast("他正在租借中，租期结束前不可转会","bad"); closeModal(); return; }
-  const fee=isFA?0:(+$("#bid-fee").value), wg=+$("#bid-wage").value, yr=+$("#bid-yr").value;
+  const fee=isFA?0:Math.round(fromCur($("#bid-fee").value)), wg=Math.round(fromCur($("#bid-wage").value)), yr=+$("#bid-yr").value;
   const ask=isFA?0:askingPrice(p), need=wageDemand(p,c);
   { const r=canAfford(c, fee, wg*52); if(!r.ok){ toast(affordMsg(c, r, fee, wg*52),"bad"); return; } }
   if(c.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
@@ -5934,7 +5994,7 @@ function submitBid(pid){
       if(first){
         const counter=Math.max(floor, Math.round((fee+ask)/2/1e4)*1e4);
         p.nego={win:winKey(), round:1, counter};
-        const fi=$("#bid-fee"); if(fi) fi.value=counter;
+        const fi=$("#bid-fee"); if(fi) fi.value=toCurIn(counter);
         const box=$("#bid-nego");
         if(box) box.innerHTML=`<span style="color:var(--warn)">${esc(seller.cn)} 还价 <b>${money(counter)}</b>（要价 ${money(ask)}）。你可以接受或再出一次价，再谈不拢对方就会退出。</span>`;
         const btn=$("#bid-go"); if(btn) btn.textContent="按还价成交 / 再出一次";
@@ -5970,11 +6030,11 @@ function submitBid(pid){
 function renewContract(pid){
   const p=P(pid), c=UC();
   if(ownerOf(p)!==c.id){ toast("只有母队能和他谈续约","bad"); return; }
-  const nw=Math.round(Math.max(p.wage*1.15, calcWage(p,c.rep)*(1+ (p.pa-p.ca)/300))/50)*50;
+  const nw=Math.round(Math.max(p.wage*1.15, calcWage(p,c.rep,c)*(1+ (p.pa-p.ca)/300))/50)*50;
   openModal("续约 "+esc(p.cn),
     `<div class="hint">${esc(p.cn)} 目前周薪 ${money(p.wage)}，合同到 ${p.contract} 年。</div>
      <div style="margin-top:10px">他的要求：<b style="color:var(--acc)">${money(nw)}</b> / 周</div>
-     <div style="margin-top:10px"><label>提供周薪</label><input id="rn-w" type="number" value="${nw}" style="width:160px"></div>
+     <div style="margin-top:10px"><label>提供周薪（${CURSYM()}）</label><input id="rn-w" type="number" value="${toCurIn(nw)}" style="width:160px"></div>
      <div style="margin-top:8px"><label>年限</label><select id="rn-y"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
      <div class="hint" id="rn-cost" style="margin-top:10px"></div>`,
     `<button class="pri" onclick="doRenew(${pid},${nw})">确认续约</button><button onclick="closeModal()">取消</button>`);
@@ -5983,7 +6043,7 @@ function renewContract(pid){
 }
 function updRenewCost(pid){
   const box=$("#rn-cost"); if(!box) return;
-  const p=P(pid), c=UC(), w=+(($("#rn-w")||{}).value||p.wage);
+  const p=P(pid), c=UC(), w=($("#rn-w")&&$("#rn-w").value!=="")? fromCur($("#rn-w").value) : p.wage;
   const shareK=p.loan? (1-p.loan.wageShare):1, d=Math.round((w-p.wage)*shareK), inc=d*52;
   const cn=committedNext(c), cap=wageCap(c), has=p.contract>WORLD.season;
   const next=cn+(has? inc : w*52*shareK);
@@ -5991,7 +6051,7 @@ function updRenewCost(pid){
     +(d<=0?"　<span class=\"hint\">原薪或降薪续约不占用额度。</span>":"");
 }
 function doRenew(pid,need){
-  const p=P(pid), c=UC(); const w=+$("#rn-w").value, y=+$("#rn-y").value;
+  const p=P(pid), c=UC(); const w=Math.round(fromCur($("#rn-w").value)), y=+$("#rn-y").value;
   if(ownerOf(p)!==c.id) return;
   if((p.unrest||0)>=2){ toast(`${p.cn} 拒绝续约——他已要求转会`,"bad"); return; }
   if(w<need*0.95){ toast(`${p.cn} 拒绝了这份合同`,"bad"); return; }
@@ -6020,7 +6080,7 @@ function listPlayer(pid){
        <tr><td class="hint" style="width:82px">市场估价</td><td><b style="color:var(--acc)">${money(ask)}</b><span class="hint"> · 身价 ${money(p.value)}</span></td></tr>
        <tr><td class="hint">外界关注度</td><td>${Math.round(Math.min(100,heatOf(p)*100))}%${interestOf(pid).length?`<span class="hint"> · 追求者 ${interestOf(pid).map(it=>esc(C(it.club).short)).join("、")}</span>`:""}</td></tr>
      </table>
-     <div style="margin-top:12px"><label>要价（£）</label><input id="ls-price" type="number" value="${cur}" style="width:180px"></div>
+     <div style="margin-top:12px"><label>要价（${CURSYM()}）</label><input id="ls-price" type="number" value="${toCurIn(cur)}" style="width:180px"></div>
      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
        <button class="sm" onclick="setAsk(${ask})">市价</button>
        <button class="sm" onclick="setAsk(${Math.round(ask*0.85/1000)*1000})">−15%</button>
@@ -6040,10 +6100,10 @@ function listPlayer(pid){
   updListHint(pid);
 }
 let LS_PID=null;                                  // 挂牌弹窗当前的球员，快捷按钮要用
-function setAsk(v){ const i=$("#ls-price"); if(i){ i.value=v; updListHint(); } }
+function setAsk(v){ const i=$("#ls-price"); if(i){ i.value=toCurIn(v); updListHint(); } }
 function updListHint(pid){
   const box=$("#ls-hint"), fin=$("#ls-fin"); if(!box) return;
-  const u=UC(), pr=Math.max(0, +(($("#ls-price")||{}).value||0));
+  const u=UC(), pr=Math.max(0, fromCur(($("#ls-price")||{}).value||0));
   const p = P(pid!=null? pid : LS_PID);
   if(!p) return;
   const ask=askingPrice(p);
@@ -6057,7 +6117,7 @@ function updListHint(pid){
 }
 function submitList(pid){
   const p=P(pid), u=UC();
-  const pr=Math.max(5000, Math.round((+(($("#ls-price")||{}).value||0))/1000)*1000);
+  const pr=Math.max(5000, Math.round(fromCur(($("#ls-price")||{}).value||0)/1000)*1000);
   const auto=!!($("#ls-auto")&&$("#ls-auto").checked);
   const first=!p.listed;
   p.listed=true; p.untouchable=false;
@@ -6239,7 +6299,7 @@ function vBuild(v){
       <div><div class="hint">当前容量</div><div class="big">${c.cap.toLocaleString()}</div></div>
       <div><div class="hint">本季主场平均上座</div><div class="big">${occ?occ.avg.toLocaleString():"-"}</div></div>
       <div><div class="hint">上座率</div><div class="big" style="color:${occ&&occ.pct>=0.97?'#00d47e':occ&&occ.pct<0.85?'#f0a020':''}">${occ?(occ.pct*100).toFixed(0)+"%":"-"}</div></div>
-      <div><div class="hint">票价</div><div class="big">£${ticketPrice(c)}</div></div>
+      <div><div class="hint">票价</div><div class="big">${money(ticketPrice(c))}</div></div>
     </div>
     <div class="hint" style="margin-bottom:10px">${!occ?"本赛季还没有主场比赛数据，可参考上季表现决定是否扩建。":occ.pct>=0.97?"几乎场场满座，扩建能直接转化为门票收入。":occ.pct<0.85?"上座率偏低，扩建的回报有限——先把成绩和声望做上去。":"上座率尚可，扩建后需要靓丽战绩来填满新看台。"}
     容量上限 ${STADIUM_MAX.toLocaleString()} 座；竣工后声望 +1。</div>`;
@@ -7275,6 +7335,24 @@ function adoptWorld(obj){
 // 旧存档迁移：重算工资预算（旧公式对小球会过紧），并把自由球员的旧合同周薪刷新为市场期望
 function migrateWorld(){
   if(!WORLD) return;
+  /* v45~v48 建的世界里真实球员合同一律到 2028，第二季末会集体到期。电脑队的打散到 2028~2031（不缩短，免得当季突然到期）；
+     玩家自己的人不动，交给合同提醒。*/
+  if(!WORLD.ctrSpread){
+    Object.values(WORLD.players).forEach(p=>{ if(!p||!p.realData||p.clubId<0||p.clubId===WORLD.userClub) return;
+      if(p.contract===2028 && WORLD.season<=2027) p.contract=2028+ri(0,3); });
+    WORLD.ctrSpread=1;
+  }
+  if(!WORLD.wageLF){
+    WORLD.clubs.forEach(c=>{ const k=wageF(c); if(k>=0.999) return;
+      const ids=c.squad.filter(id=>{ const p=P(id); return p && !p.loan; }).concat(c.loanedOut||[]);
+      ids.forEach(id=>{ const p=P(id); if(p) p.wage=Math.max(250, Math.round(p.wage*k/50)*50); }); });
+    REV_S={key:""};
+    WORLD.clubs.forEach(c=>{ const f=c.finance; if(!f) return;
+      f.rev0=revSeason(c);
+      f.cap0=Math.round(Math.max(wageCapK(c)*f.rev0, Math.min(f.cap0||Infinity, ownWages(c))*CAP_RATCHET)); });
+    FIN_CLK++;
+    WORLD.wageLF=1;
+  }
   WORLD.clubs.forEach(c=>{ if(!c.loanedOut) c.loanedOut=[]; });   // 外租索引（2026-09 新增）
   if(!WORLD.valueV2){ Object.values(WORLD.players).forEach(p=>{ if(p) p.value=calcValue(p); }); WORLD.valueV2=1; }   // 身价公式 V2（2026-09-12）
   /* 2026-09-13：以前三处放人忘了重置 contract，老档里会有「自由球员 · 合同至 2029 年」，
@@ -7369,6 +7447,12 @@ async function storageSelfTest(onStep){
 
 function vSave(v){
   v.appendChild(el("div","",`<h1>存档</h1><div class="sub">进度会在每次操作后自动保存到本浏览器（IndexedDB / Cache / localStorage 三层兜底）；也可以导出为文件长期保留或换设备继续</div>`));
+  { const cc=el("div","card"); cc.innerHTML=`<h3>显示货币 <span class="hint" style="font-weight:400">只改显示，游戏内部一律按英镑记账；设置保存在本机</span></h3>`;
+    const bar=el("div","chipgrid");
+    Object.entries(CUR_DEF).forEach(([k,d])=>{ const b=el("button","sm"+(CUR===k?" on":""),`${d.sym} ${d.n}`); b.onclick=()=>setCurrency(k); bar.appendChild(b); });
+    cc.appendChild(bar);
+    { const h=el("div","hint",`汇率按 1 英镑 = 1.17 欧元固定换算。已经收到的新闻里的金额是当时写好的文字，不会跟着变。`); h.style.marginTop="10px"; cc.appendChild(h); }
+    v.appendChild(cc); }
   if(SAVE_FAILS>0){
     const w=el("div","card");
     w.style.cssText="border-color:var(--bad);margin-bottom:12px";
