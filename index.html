@@ -414,6 +414,16 @@ img.crest{display:inline-block}
   html:not(.kb) .grid4{grid-template-columns:repeat(4,1fr)}
   html:not(.kb) #modal-box{max-height:100svh}
 }
+/* 阵容预设 */
+.preset-bar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}
+.preset{display:flex;flex-direction:column;gap:4px;min-width:0}
+.preset-main{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;min-width:0;text-align:left;padding:6px 8px}
+.preset-main .pn{font-weight:700;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preset-main .pf{font-size:11px;color:var(--dim)}
+.preset-main.empty{opacity:.55;border-style:dashed}
+.preset-ops{display:flex;gap:4px}
+.preset-ops button{flex:1;padding:4px 0;font-size:12px;min-width:0}
+.preset-ops button[data-op="ren"]{flex:0 0 34px}
 </style>
 </head>
 <body>
@@ -2791,7 +2801,7 @@ function doSub(M,side,outMan,inPid){
 function aiTactics(M){
   if(M.t<70) return;
   M.teams.forEach((T,side)=>{
-    if(side===M.userSide && !M.autoUser && M.userTook) return;
+    if(side===M.userSide && !M.autoUser && subModeOf(M)!=="all") return;
     if(T.adj) return;
     const diff=M.score[side]-M.score[1-side], b=T.tac0||T.tac;
     if(diff<0 && M.t>=70){ T.adj=1; if(rnd()<0.8){ T.tac.mentality=Math.min(4,b.mentality+2); T.tac.tempo=Math.min(4,b.tempo+1); } }
@@ -2802,8 +2812,10 @@ function aiTactics(M){
 }
 function aiSubs(M){
   M.teams.forEach((T,side)=>{
-    // 玩家一方：没接管时助教照看（和直接跳过同一套逻辑）；亲自换过人或改过战术后，只自动补伤员
-    const userLive = side===M.userSide && !M.autoUser && M.userTook;
+    // 玩家一方按换人开关：全管=和电脑一样；只补伤员=只换伤员；全手动=助教一个都不换
+    const mode = (side===M.userSide && !M.autoUser)? subModeOf(M) : "all";
+    if(mode==="manual") return;
+    const userLive = mode==="inj";
     if(!canSub(M,side)) return;
     if(M.t<55 && !T.men.some(m=>m.injured&&m.off&&!m.subDone)) return;
     // 受伤优先
@@ -5107,6 +5119,7 @@ function vSquad(v){
   ap.onclick=()=>{autoPickLineup(UC());toast("已按最佳状态自动排阵");render();};
   bar.appendChild(ap);
   v.appendChild(bar);
+  v.appendChild(presetBar());
 
   let rows=c.squad.map(i=>P(i));
   if(SQUADFILTER==="inj") rows=rows.filter(p=>p.injury>0||p.susp>0);
@@ -5521,6 +5534,7 @@ let SELSLOT=null;
 function vTactics(v){
   const c=UC(), t=c.tactic;
   v.appendChild(el("div","",`<h1>战术</h1><div class="sub">点击场上位置，再点击右侧球员完成调整</div>`));
+  v.appendChild(presetBar());
   const wrap=el("div","row");
 
   // ---- 球场 ----
@@ -5573,6 +5587,13 @@ function vTactics(v){
     <label style="display:inline-flex;align-items:center;gap:5px;color:var(--txt)">
       <input type="checkbox" id="cntr" ${t.counter?"checked":""}> 快速反击</label>`;
   set.appendChild(chk);
+  { const cur=autoSubPref(), d=el("div"); d.style.cssText="margin-top:10px;padding-top:9px;border-top:1px solid var(--line)";
+    d.innerHTML=`<label>比赛中助教换人（默认）</label><div class="chipgrid" style="margin-top:5px"></div>
+      <div class="hint" style="margin-top:5px">${{all:"体能换人、伤员替换、落后/领先时的战术调整都交给助教。你亲手换人后本场自动转为只补伤员。",inj:"助教只替换受伤下场的球员，其余你来。",manual:"助教不碰阵容，伤员下场后少一人，直到你换人。"}[cur]}比赛中可以在看板上临时切换。</div>`;
+    const g=d.querySelector(".chipgrid");
+    SUB_MODES.forEach(m=>{ const b=el("button","sm"+(cur===m?" on":""),SUB_MODE_N[m]);
+      b.onclick=()=>{ (WORLD.settings||(WORLD.settings={})).autoSub=m; render(); }; g.appendChild(b); });
+    set.appendChild(d); }
   right.appendChild(set);
 
   // 可选球员
@@ -5627,7 +5648,8 @@ function vTactics(v){
   wrap.appendChild(right);
   v.appendChild(wrap);
 
-  const fsel=$("#fmtsel"); if(fsel) fsel.onchange=e=>{ c.tactic.formation=e.target.value; autoPickLineup(c); SELSLOT=null; render(); };
+  const fsel=$("#fmtsel"); if(fsel) fsel.onchange=e=>{ const kept=remapLineup(c, e.target.value); SELSLOT=null;
+    toast(`已换成 ${e.target.value}，原首发留下 ${kept} 人`); render(); };
   const off=$("#offs"); if(off) off.onchange=e=>c.tactic.offside=e.target.checked;
   const cnt=$("#cntr"); if(cnt) cnt.onchange=e=>c.tactic.counter=e.target.checked;
 }
@@ -5652,6 +5674,87 @@ function benchRemove(pid){
 function benchToggle(pid){
   const c=UC();
   if(c.subs.includes(pid)) benchRemove(pid); else benchAdd(pid);
+}
+
+/* ================= 阵容预设（3 套） ================= */
+// club.presets[i] = {name, form, lineup:[ids], subs:[ids], tac:{完整战术}}；只给玩家球队用
+const PRESET_N = 3;
+function presetsOf(c){ if(!Array.isArray(c.presets)) c.presets=[]; while(c.presets.length<PRESET_N) c.presets.push(null); return c.presets; }
+function presetDefaultName(c,i){ return `方案${i+1}`; }
+function presetSave(i){
+  const c=UC(), ps=presetsOf(c), old=ps[i];
+  ps[i]={ name: old&&old.name? old.name : presetDefaultName(c,i), form:c.tactic.formation,
+          lineup:c.lineup.slice(), subs:(c.subs||[]).slice(), tac:JSON.parse(JSON.stringify(c.tactic)) };
+  closeModal(); toast(`已存为「${ps[i].name}」（${ps[i].form}）`); render();
+}
+function presetSaveAsk(i){
+  const c=UC(), cur=presetsOf(c)[i];
+  if(!cur){ presetSave(i); return; }
+  openModal("覆盖预设", `<div>把当前的阵型、首发、替补和战术指令存进「<b>${esc(cur.name)}</b>」？<div class="hint" style="margin-top:6px">原来存的 ${esc(cur.form)} 会被覆盖。</div></div>`,
+    `<button onclick="closeModal()">取消</button><button class="pri" onclick="presetSave(${i})">覆盖</button>`);
+}
+function presetRenameAsk(i){
+  const c=UC(), cur=presetsOf(c)[i];
+  if(!cur){ toast("这个方案还是空的，先点「存当前」","warn"); return; }
+  openModal("预设改名", `<input id="ps-name" maxlength="12" value="${esc(cur.name)}" style="width:100%">
+    <div class="hint" style="margin-top:6px">最多 12 个字，比如「主力 4-3-3」「杯赛轮换」</div>`,
+    `<button onclick="closeModal()">取消</button><button class="pri" onclick="presetRenameDo(${i})">确定</button>`);
+  setTimeout(()=>{ const x=$("#ps-name"); if(x){ x.focus(); x.select(); } },50);
+}
+function presetRenameDo(i){
+  const c=UC(), cur=presetsOf(c)[i], x=$("#ps-name"); if(!cur||!x) return;
+  const n=x.value.trim().slice(0,12); if(n) cur.name=n;
+  closeModal(); render();
+}
+function presetApply(i){
+  const c=UC(), pr=presetsOf(c)[i];
+  if(!pr){ toast("这个方案还是空的，先点「存当前」","warn"); return; }
+  const tac=JSON.parse(JSON.stringify(pr.tac||{}));
+  if(!FORMATIONS[tac.formation]) tac.formation=FORMATIONS[pr.form]? pr.form : c.tactic.formation;
+  c.tactic=Object.assign(defaultTactic(), tac);
+  c.lineup=pr.lineup.slice(); c.subs=(pr.subs||[]).slice();
+  repairLineup(c);
+  // 说清楚谁被顶掉了、为什么
+  const inSquad=new Set(c.squad), why=id=>{ const p=P(id); return !p||!inSquad.has(id)? "不在队" : p.injury>0? "伤" : p.susp>0? "停赛" : ""; };
+  const ch=[];
+  pr.lineup.forEach((id,k)=>{ if(id==null||c.lineup[k]===id) return; const w=why(id); if(!w) return;
+    const a=P(id), b=c.lineup[k]!=null?P(c.lineup[k]):null;
+    ch.push(`${a?a.cn.split("·").pop():"?"}（${w}）→ ${b?b.cn.split("·").pop():"空缺"}`); });
+  SELSLOT=null;
+  toast(`已套用「${pr.name}」${ch.length? "："+ch.join("，") : ""}`, ch.length?"warn":"");
+  render();
+}
+function presetBar(){
+  const c=UC(), ps=presetsOf(c);
+  const box=el("div","preset-bar");
+  ps.forEach((pr,i)=>{
+    const col=el("div","preset");
+    col.innerHTML=`<button class="sm preset-main ${pr?"":"empty"}" title="${pr?esc(pr.name)+" · "+esc(pr.form):"空"}">
+        <span class="pn">${pr?esc(pr.name):presetDefaultName(c,i)}</span><span class="pf">${pr?esc(pr.form):"空"}</span></button>
+      <div class="preset-ops"><button class="sm" data-op="save">存当前</button><button class="sm" data-op="ren" ${pr?"":"disabled"}>✎</button></div>`;
+    col.querySelector(".preset-main").onclick=()=>presetApply(i);
+    col.querySelector('[data-op="save"]').onclick=()=>presetSaveAsk(i);
+    col.querySelector('[data-op="ren"]').onclick=()=>presetRenameAsk(i);
+    box.appendChild(col);
+  });
+  return box;
+}
+// 换阵型时尽量保留原首发：同位置的人原地不动，其余按适配度对到新位置，实在对不上的才换人
+function remapLineup(c, newForm){
+  const oldSlots=FORMATIONS[c.tactic.formation], newSlots=FORMATIONS[newForm];
+  const old=(c.lineup||[]).map((id,k)=>({id,pos:oldSlots&&oldSlots[k]?oldSlots[k][0]:null})).filter(x=>x.id!=null&&P(x.id));
+  c.tactic.formation=newForm;
+  const lineup=newSlots.map(()=>null), used=new Set(), pairs=[];
+  old.forEach(o=>newSlots.forEach((sl,k)=>{ const p=P(o.id), fit=posFit(p,sl[0]);
+    pairs.push({id:o.id,k,key:(o.pos===sl[0]?2:0)+fit, sc:playerScore(p,sl[0]), fit}); }));
+  pairs.sort((a,b)=>b.key-a.key||b.sc-a.sc);
+  pairs.forEach(x=>{ if(used.has(x.id)||lineup[x.k]!=null) return; if(x.key<2 && x.fit<0.6) return; lineup[x.k]=x.id; used.add(x.id); });
+  const dropped=old.map(o=>o.id).filter(id=>!used.has(id));
+  c.lineup=lineup;
+  c.subs=dropped.concat((c.subs||[]).filter(id=>!dropped.includes(id))).slice(0, BENCH_MAX+dropped.length);
+  repairLineup(c);
+  if(c.subs.length>BENCH_MAX) c.subs=c.subs.slice(0,BENCH_MAX);
+  return old.length-dropped.length;
 }
 
 /* ================= 训练 ================= */
@@ -6730,6 +6833,7 @@ function startUserMatch(fx){
   if(CURMATCH && CURMATCH.h===fx.home && CURMATCH.a===fx.away){ VIEW="match"; render(); return; }
   const side = fx.home===WORLD.userClub?0:1;
   CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round, record:true, userSide:side, ...knockoutOpts(fx)});
+  CURMATCH.subMode=autoSubPref();
   ANIM={raf:0,playing:false,speed:(WORLD.settings&&WORLD.settings.matchSpeed)||1,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false,trail:[],cap:null};
   VIEW="match"; render();
   setTimeout(()=>toggleplay(true),350);
@@ -6762,6 +6866,7 @@ function vMatch(v){
          <button class="sm" id="btn-skip">⏭ 直接看结果</button>
          <button class="sm" id="btn-sub">🔁 换人 (${5-M.subsMade[M.userSide]})</button>
          <button class="sm" id="btn-tac">⚙ 临场战术</button>
+         <button class="sm" id="btn-auto" title="切换助教的换人权限">${subModeLabel(subModeOf(M))}</button>
          <span style="flex:1"></span>
          <button class="pri" id="btn-done" style="display:none">完成比赛 ▶</button>
        </div>
@@ -6780,6 +6885,7 @@ function bindMatchControls(){
     $("#btn-skip").onclick=()=>skipMatch();
     $("#btn-sub").onclick=()=>subDialog();
     $("#btn-tac").onclick=()=>tacDialog();
+    $("#btn-auto").onclick=()=>cycleSubMode();
     $("#btn-done").onclick=()=>completeMatch();
     document.querySelectorAll(".spd").forEach(b=>b.onclick=()=>{
       ANIM.speed=+b.dataset.s; if(WORLD.settings) WORLD.settings.matchSpeed=ANIM.speed;
@@ -7060,7 +7166,7 @@ function subDialog(preOut){
 function subLeft(){ const M=CURMATCH; return 5-M.subsMade[M.userSide]-SUBQ.length; }
 function renderSubDialog(){
   const M=CURMATCH, side=M.userSide, T=M.teams[side], club=C(T.cid);
-  const on=T.men.filter(m=>!m.off);
+  const on=subOuts(T);
   const queuedOut=SUBQ.map(q=>q.out), queuedIn=SUBQ.map(q=>q.in);
   const bench=club.subs.filter(id=>P(id)&&!T.benchUsed.includes(id)&&P(id).injury<=0&&!queuedIn.includes(id));
   const slots=FORMATIONS[T.form];
@@ -7073,7 +7179,7 @@ function renderSubDialog(){
     <div class="col"><div class="hint" style="margin-bottom:5px">场上球员</div>
      ${on.map((m,i)=>{ const q=queuedOut.includes(m);
        return `<div class="clickable" ${q?'':`onclick="pickOut(${i})"`} style="display:flex;gap:8px;padding:5px;border-bottom:1px solid #1d242e;border-radius:4px;${q?'opacity:.35;':''}${SUBOUT===i?'background:#16301f;':''}">
-        <span class="tag t-${POS_GRP[m.pos]}">${POS_CN[m.pos]}</span><span style="flex:1">${esc(nm(m))}${m.yellow?' 🟨':''}</span>
+        <span class="tag t-${POS_GRP[m.pos]}">${POS_CN[m.pos]}</span><span style="flex:1">${esc(nm(m))}${m.yellow?' 🟨':''}${m.off?' <span class="tag t-b">🚑 已伤退</span>':''}</span>
         <span style="color:${m.cond>70?'#00d47e':m.cond>50?'#f0a020':'#e5484d'}">${Math.round(m.cond)}%</span>
         <span style="color:var(--gold);min-width:26px;text-align:right">${m.rating.toFixed(1)}</span></div>`;}).join("")}</div>
     <div class="col"><div class="hint" style="margin-bottom:5px">替补席${want?`（换下 ${POS_CN[want]}，已按适配排序）`:""}</div>
@@ -7097,7 +7203,7 @@ function pickIn(id){
   const M=CURMATCH, side=M.userSide;
   if(SUBOUT==null){ toast("请先在左侧选择要换下的球员","warn"); return; }
   if(subLeft()<=0){ toast("换人名额已用完","bad"); return; }
-  const on=M.teams[side].men.filter(m=>!m.off);
+  const on=subOuts(M.teams[side]);
   SUBQ.push({out:on[SUBOUT], in:id}); SUBOUT=null; renderSubDialog();
 }
 function unqueueSub(i){ SUBQ.splice(i,1); renderSubDialog(); }
@@ -7120,7 +7226,8 @@ function autoSubSuggest(){
 }
 function applySubs(){
   const M=CURMATCH, side=M.userSide; let n=0;
-  SUBQ.forEach(q=>{ if(!q.out.off && doSub(M,side,q.out,q.in)) n++; });
+  SUBQ.forEach(q=>{ const inj=q.out.off&&q.out.injured&&!q.out.subDone;
+    if((!q.out.off||inj) && doSub(M,side,q.out,q.in)){ if(inj) q.out.subDone=true; n++; } });
   if(n) takeOver(M);
   toast(n? `完成 ${n} 次换人` : "换人失败：名额已用完", n?"":"bad");
   closeSubDialog();
@@ -7130,7 +7237,26 @@ function closeSubDialog(){
   SUBQ=[]; SUBOUT=null; closeModal(); refreshMatchUI(true); drawPitch(1);
   if(SUBRESUME && CURMATCH && !CURMATCH.done){ SUBRESUME=false; toggleplay(true); }
 }
-function takeOver(M){ if(M && !M.userTook){ M.userTook=true; toast("你接管了临场指挥，助教不再自动换人和调整战术"); } }
+// 亲手换人/调战术：本场从「助教全管」落到「只补伤员」（看板按钮可以再切回去）
+function takeOver(M){
+  if(!M) return; M.userTook=true;
+  if(subModeOf(M)==="all"){ M.subMode="inj"; toast("你接管了临场指挥：助教本场只补伤员，可在看板上切回"); refreshSubModeBtn(); }
+}
+// ---------- 自动换人开关（settings.autoSub：all 全管 / inj 只补伤员 / manual 全手动） ----------
+const SUB_MODES=["all","inj","manual"];
+const SUB_MODE_N={all:"助教全管",inj:"只补伤员",manual:"全手动"};
+function normSubMode(v){ return v===true||v==null? "all" : v===false? "inj" : SUB_MODES.includes(v)? v : "all"; }
+function autoSubPref(){ return normSubMode(WORLD.settings&&WORLD.settings.autoSub); }
+function subModeOf(M){ return normSubMode(M&&M.subMode); }
+function subModeLabel(m){ return "🧑‍💼 "+SUB_MODE_N[m]; }
+function refreshSubModeBtn(){ const b=$("#btn-auto"); if(b&&CURMATCH){ const t=subModeLabel(subModeOf(CURMATCH)); if(b.textContent!==t) b.textContent=t; } }
+function cycleSubMode(){
+  const M=CURMATCH; if(!M||M.done) return;
+  const m=SUB_MODES[(SUB_MODES.indexOf(subModeOf(M))+1)%3]; M.subMode=m; refreshSubModeBtn();
+  toast({all:"本场助教全管：体能换人、伤员替换、70 分钟后的战术调整",inj:"本场助教只替换受伤球员",manual:"本场全手动：伤员下场后要你自己换人"}[m]);
+}
+// 换人面板左侧可换下的人：场上球员 + 已伤退还没人顶替的（放最后，保证前面的序号和场上名单一致）
+function subOuts(T){ return T.men.filter(m=>!m.off).concat(T.men.filter(m=>m.off&&m.injured&&!m.subDone)); }
 function tacDialog(){
   const M=CURMATCH, T=M.teams[M.userSide], t=T.tac;
   const opts=[["mentality","心态",MENTALITY],["tempo","节奏",TEMPO_N],["press","逼抢",PRESS_N],["width","宽度",WIDTH_N]];
