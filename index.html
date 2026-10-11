@@ -5951,7 +5951,8 @@ function vTransfer(v){
   let searchTotal=0;
   function fillSearch(){
     sr.innerHTML="";
-    let pool=Object.values(WORLD.players).filter(p=>p.clubId!==WORLD.userClub && !p.loan);
+    // 搜索用于查找和关注球员；租借只限制交易，不影响可见性。自家租入/租出仍在阵容页查看。
+    let pool=Object.values(WORLD.players).filter(p=>p.clubId!==WORLD.userClub && ownerOf(p)!==WORLD.userClub);
     if(TFILTER.pos) pool=pool.filter(p=>p.pos===TFILTER.pos||p.pos2.includes(TFILTER.pos));
     if(TFILTER.tier==="fa") pool=pool.filter(p=>p.clubId<0);
     else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).nation===EURO_NATION);
@@ -5966,7 +5967,7 @@ function vTransfer(v){
     if(!SORT.k){SORT.k="ca";SORT.d=-1;}
     sr.appendChild(makeTable([
       {h:"姓名",k:"n",v:p=>p.cn,r:p=>esc(p.cn)},
-      {h:"俱乐部",k:"c",v:p=>p.clubId>=0?C(p.clubId).cn:"",r:p=>p.clubId>=0?crestHTML(C(p.clubId))+esc(C(p.clubId).short):'<span class="tag t-n">自由</span>'},
+      {h:"俱乐部",k:"c",v:p=>p.clubId>=0?C(p.clubId).cn:"",r:p=>p.clubId>=0?crestHTML(C(p.clubId))+esc(C(p.clubId).short)+(p.loan?` <span class="tag t-i">租借中</span><div class="hint">母队 ${esc(C(ownerOf(p)).short)}</div>`:""):'<span class="tag t-n">自由</span>'},
       {h:"位置",k:"pos",v:p=>POSITIONS.indexOf(p.pos),r:p=>`<span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>`},
       {h:"年龄",k:"age",cls:"num",v:p=>p.age,r:p=>p.age},
       {h:"能力",k:"ca",cls:"num",v:p=>p.ca,r:p=>`<b style="color:${caColor(p.ca)}">${ovr(p)}</b>`},
