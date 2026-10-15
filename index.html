@@ -3042,7 +3042,8 @@ function tickProjects(){
     ps.forEach(p=>p.left--);
     ps.filter(p=>p.left<=0).forEach(p=>{
       if(p.type==="fac"){
-        c[p.k]=clamp(c[p.k]+1,3,20);
+        const target=Number.isFinite(p.to)?p.to:c[p.k]+1;
+        c[p.k]=clamp(Math.max(c[p.k],target),3,20);
         if(c.id===WORLD.userClub) news(`${p.n}升级完成`,`${p.n}已升级至 ${c[p.k]} 级，新的设施即刻投入使用。`,"good");
       } else {
         c.cap+=p.seats; c.rep=clamp(c.rep+1,1,100);
@@ -4738,7 +4739,6 @@ function endSeason(){
   WORLD.clubs.forEach(c=>{
     c.finance.income=0; c.finance.expense=0;
     c.board.conf=clamp(c.board.conf*0.5+45,20,95);
-    c.coachRating=clamp(c.coachRating+ri(-1,1),3,20);
     autoPickLineup(c);
   });
   bridgeTiers(moves);                       // 升班马补强 / 降班马挂牌，转会留到玩家能参与的夏窗
