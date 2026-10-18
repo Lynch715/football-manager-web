@@ -89,6 +89,7 @@ input,textarea,select{-webkit-user-select:text;user-select:text}
 h1{font-size:19px;font-weight:700;margin-bottom:3px}
 h2{font-size:15px;font-weight:700;margin:18px 0 8px}
 .sub{color:var(--dim);font-size:12px;margin-bottom:14px}
+.creator-notice{font-size:11px;line-height:1.7;color:var(--dim);text-align:center;margin:20px 0 8px;padding:0 8px;overflow-wrap:anywhere}
 .card{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
 .card>h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--txt);
   display:flex;align-items:center;gap:8px}
@@ -5004,6 +5005,9 @@ function renderNav(){
   });
 
 }
+function creatorNotice(){
+  return el("p","creator-notice","发现更多游戏，请在小红书、闲鱼搜索原创作者“模拟游戏大全”。");
+}
 function go(v){ VIEW=v; SORT={k:null,d:1}; render(); }
 
 function renderTop(){
@@ -5170,6 +5174,7 @@ function vHome(v){
     nw.appendChild(d);
   });
   v.appendChild(nw);
+  v.appendChild(creatorNotice());
 }
 
 /* ================= 收件箱 ================= */
@@ -7759,6 +7764,7 @@ function vSave(v){
   const nb=el("button","danger","开始新游戏");
   nb.onclick=()=>{ if(confirm("确定放弃当前进度并重新开始？")) newGameScreen(); };
   nn.appendChild(nb); v.appendChild(nn);
+  v.appendChild(creatorNotice());
 }
 function saveGame(){
   const s=JSON.stringify(WORLD);
@@ -7991,6 +7997,7 @@ function saveMenu(m){
     r.readAsText(f); };
   box.appendChild(mk("","📂 导入存档文件", ()=>inp.click()));
   box.appendChild(inp);
+  box.appendChild(creatorNotice());
   ls.appendChild(box);
 }
 
@@ -8044,6 +8051,7 @@ function newGameScreen(){
     const b=el("button","sm","← 返回，继续原来的存档"); b.onclick=()=>startMenu();
     back.appendChild(b); box.appendChild(back);
   }
+  box.appendChild(creatorNotice());
   ls.appendChild(box);
 }
 let REAL_DATA_P=null;
