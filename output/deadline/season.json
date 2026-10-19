@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "checks": 2,
+  "sha256": "ab75a9b52fbb15c76bc57536479be92224a7437b2528f4a5e184ec714b572416",
+  "records": [
+    {
+      "season": 2026,
+      "nextSeason": 2027,
+      "days": 289,
+      "marketDays": 62,
+      "userMatches": 44,
+      "eachDeadlineMarketOnce": true
+    },
+    {
+      "season": 2027,
+      "nextSeason": 2028,
+      "days": 288,
+      "marketDays": 62,
+      "userMatches": 42,
+      "eachDeadlineMarketOnce": true
+    }
+  ]
+}

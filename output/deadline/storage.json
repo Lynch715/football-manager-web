@@ -1,0 +1,11 @@
+[
+  "A02 successful newer LS/cache beat stale IndexedDB",
+  "A02 stale layer healed from latest valid body",
+  "A02 corrupt newest body falls back by checksum",
+  "A02 embedded metadata wins over stale index",
+  "A02 legacy compressed and raw JSON readable",
+  "A02 concurrent saves serialized in invocation order",
+  "A10 deletion cancels pending and drains inflight saves; no autosave recreation",
+  "A02 total failure reported",
+  "A02 invalid old layer never masks valid legacy body"
+]

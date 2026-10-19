@@ -4043,7 +4043,27 @@ function marketDaily(){
     const n=(WORLD.offers||[]).length;
     news(`${windowName()}截止日临近`,`转会窗将在 3 天后关闭，各俱乐部正在加紧最后的谈判${n?`。你手上还有 ${n} 份未处理的报价，窗口关闭后将自动失效`:""}。`,"warn");
   }
-  if(WORLD.day===endD){
+}
+// 截止日先生成市场，让玩家有一次完整的处理机会；离开当天再关窗。
+function isTransferDeadline(){
+  return inTransferWindow() && WORLD.day===windowEndDay();
+}
+function prepareDeadlineMarket(){
+  if(!isTransferDeadline()) return false;
+  const key=WORLD.season+":"+WORLD.day;
+  if(WORLD.deadlineMarketKey===key) return false;
+  marketDaily();
+  WORLD.deadlineMarketKey=key;
+  news(`${windowName()}截止日`,"今天仍可接受报价、还价或调整租借条款。离开今天（继续推进或完成今天的比赛）后，转会窗才会关闭，未处理的报价将失效。","warn");
+  markDirty();
+  return true;
+}
+function closeTransferWindow(){
+  if(!isTransferDeadline()) return;
+  const key=WORLD.season+":"+WORLD.day;
+  if(WORLD.closedTransferWindowKey===key) return;
+  const u=UC(), endD=windowEndDay();
+  {
     // 挂了一整窗没人问的，给一条提示，顺便说清可能的原因
     u.squad.map(i=>P(i)).filter(p=>p.listed && !p.loan).forEach(p=>{
       if((WORLD.offers||[]).some(o=>o.pid===p.id)) return;
@@ -4062,6 +4082,7 @@ function marketDaily(){
     const top=paid.sort((a,b)=>b.fee-a.fee)[0];
     news(`${windowName()}关闭`,`本次转会窗共完成 ${L.length} 笔转会（其中 ${paid.length} 笔付费转会），总金额 ${money(paid.reduce((s,t)=>s+t.fee,0))}${top?`；标王为 ${top.name}（${C(top.to).cn}，${money(top.fee)}）`:""}。下一个转会窗约 ${nextWindowIn()} 天后开启。`,"info");
   }
+  WORLD.closedTransferWindowKey=key;
 }
 
 // ---------- 处理收到的报价 ----------
@@ -4882,22 +4903,25 @@ function processDayEnd(day){
     if(day===0) contractReminder("start");
     if(dt0.getMonth()===0 && dt0.getDate()===1) contractReminder("winter");
     const lf=lastFixtureDay(); if(lf>20 && day>=lf-14) contractReminder("final"); }
-  if(inTransferWindow()) marketDaily();
+  // 截止日市场已在进入当天时处理，日末不再生成来不及操作的新报价。
+  if(inTransferWindow() && !isTransferDeadline()) marketDaily();
   faSigningRound();                 // 自由球员不受转会窗限制，全年都跑
   const dt=dateOf(day);
   if(dt.getDay()===1) weeklyTick();
   if(dt.getMonth()===2 && dt.getDate()===20 && !WORLD.youthDone){ WORLD.youthDone=true; youthIntake(); }
   autoSellRound();                  // 到价自动成交（留一天给竞价，所以放在报价过期之前）
-  // 即将进入次日：到期日当天的手动处理和自动成交已完成，此时才清理。
-  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>offerExpiryDay(o)>WORLD.day && inTransferWindow());
+  closeTransferWindow();
+  // 离开截止日时全部失效；普通日期保持原有到期日清理规则。
+  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>!isTransferDeadline() && offerExpiryDay(o)>WORLD.day && inTransferWindow());
 }
 
 /* 到价自动成交。不当场成交——留一天给别家竞价（竞价抬价 6~18% 仍有机会发生），
-   所以只看昨天或更早收到的报价，同一球员取最高的那份。玩家当天手动处理过的自然扫不到。*/
+   通常只看昨天或更早收到的报价；截止日离开当天时也处理当天报价。
+   同一球员取最高的那份，玩家已经手动处理过的自然扫不到。*/
 function autoSellRound(){
   if(!inTransferWindow()) return;
   const u=UC(), offs=WORLD.offers||[];
-  const ready=offs.filter(o=>!offerDateError(o) && o.type!=="loan" && o.atAsk && o.day<WORLD.day
+  const ready=offs.filter(o=>!offerDateError(o) && o.type!=="loan" && o.atAsk && (o.day<WORLD.day || isTransferDeadline())
      && P(o.pid) && P(o.pid).autoSell && P(o.pid).clubId===u.id && !P(o.pid).loan);
   const byP={};
   ready.forEach(o=>{ if(!byP[o.pid] || o.fee>byP[o.pid].fee) byP[o.pid]=o; });
@@ -4915,12 +4939,15 @@ function autoSellRound(){
 // 主「继续」入口，返回状态
 function advance(){
   if(WORLD.gameOver) return {t:"over"};
+  // 兼容直接停在截止日的旧档：先补市场并返回玩家，下一次继续才推进。
+  if(prepareDeadlineMarket()) return {t:"deadline"};
   const uf=userFixtureOn(WORLD.day);
   if(uf) return {t:"match", fx:uf};
   simDay(WORLD.day,false);
   processDayEnd(WORLD.day);
   WORLD.day++;
   if(WORLD.day>=SEASON_DAYS || allFixturesDone()){ WORLD.youthDone=false; endSeason(); return {t:"season"}; }
+  prepareDeadlineMarket();
   return {t:"day"};
 }
 function allFixturesDone(){ return !WORLD.fixtures.some(f=>!f.played); }
@@ -4935,6 +4962,7 @@ function finishUserMatch(){
   WORLD.day++;
   CURMATCH=null;
   if(WORLD.day>=SEASON_DAYS || allFixturesDone()){ WORLD.youthDone=false; endSeason(); return "season"; }
+  prepareDeadlineMarket();
   return "ok";
 }
 
@@ -5416,7 +5444,7 @@ function pitchDialog(pid){
   const willMind = !(p.listed || (p.unrest||0)>=1 || p.wantsLoan);
   openModal("推销 "+esc(p.cn),
     `<div class="hint">${POS_CN[p.pos]} · ${p.age} 岁 · 能力 ${ovr(p)} · 周薪 ${money(p.wage)} · 你的要价 <b style="color:var(--acc)">${money(price)}</b>${p.listed?"":"（未挂牌，按市价）"}</div>
-     <div class="hint" style="margin-top:6px">${left>0?`本窗还可推销 <b>${left}</b> 家（每名球员每窗最多 3 家，同一家只能推一次）。`:"<b>本窗推销次数已用完。</b>"}对方会在 1~3 天内答复。</div>
+     <div class="hint" style="margin-top:6px">${left>0?`本窗还可推销 <b>${left}</b> 家（每名球员每窗最多 3 家，同一家只能推一次）。`:"<b>本窗推销次数已用完。</b>"}${isTransferDeadline()?"截止日推荐将在今天答复。":"对方会在 1~3 天内答复。"}</div>
      <div class="scroll" style="max-height:280px;margin-top:8px">${rows}</div>
      <div class="hint" style="margin-top:10px">成交后可用资金 +${money(price)} + 剩余周薪 ${money(p.wage*remWeeks(u))}，下季工资承诺 −${money(p.wage*52)}。</div>
      <div class="hint" style="margin-top:6px">球员对被兜售的反应：${willMind?'<span style="color:var(--warn)">他会不高兴（士气下降）</span>':"他本来就想走，不会介意"}。</div>`,
@@ -5446,7 +5474,9 @@ function sendPitch(pid){
     if(u.lineup.includes(pid)) p.unrest=Math.min(2,(p.unrest||0)+1);
   }
   news(`已向 ${ids.map(i=>C(i).short).join("、")} 推荐 ${p.cn}`,
-    `${u.cn} 主动向 ${ids.map(i=>esc(C(i).cn)).join("、")} 推荐了 ${p.cn}，要价 ${money(price)}。对方会在几天内答复。`,"info");
+    `${u.cn} 主动向 ${ids.map(i=>esc(C(i).cn)).join("、")} 推荐了 ${p.cn}，要价 ${money(price)}。${isTransferDeadline()?"对方将在今天答复。":"对方会在几天内答复。"}`,"info");
+  // 最后一天新发起的推荐也要先交回回复，不能等到关窗后。
+  if(isTransferDeadline()) pitchReplies();
   toast(`已推荐给 ${ids.length} 家俱乐部`); closeModal(); render();
 }
 /* 推销回复。每日在 marketDaily 里跑。*/
@@ -7914,6 +7944,7 @@ function autoSave(){ markDirty(); }
 function enterGame(){
   document.getElementById("loadscr").style.display="none";
   document.getElementById("app").style.display="flex";
+  prepareDeadlineMarket();
   render();
 }
 function continueGame(){

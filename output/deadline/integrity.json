@@ -1,0 +1,31 @@
+{
+  "sourceBeforeSHA256": "ffb423a8b3f8dd4df03732d1da2b96b0b568d40b68ed96166a3595c99faa1de2",
+  "sourceAfterSHA256": "7e45a1860344186fe20fa66d86423111be547d05c9c03931bb00095b6733a5b9",
+  "publishSHA256": "ab75a9b52fbb15c76bc57536479be92224a7437b2528f4a5e184ec714b572416",
+  "unchangedFunctions": [
+    "adoptWorld",
+    "migrateWorld",
+    "acceptOffer",
+    "rejectOffer",
+    "submitCounter",
+    "loanPlayer",
+    "transferPlayer",
+    "aiOffersToUser",
+    "aiLoanOffersToUser",
+    "makeLoanOffer",
+    "pitchReplies",
+    "dailyTick",
+    "weeklyTick",
+    "trainClub",
+    "storeSave",
+    "readSave",
+    "zipSave",
+    "unzipSave",
+    "onContinue"
+  ],
+  "imagesUnchanged": true,
+  "stylesUnchanged": true,
+  "rostersAnd96CrestsUnchanged": true,
+  "serviceWorkerOnlyCacheVersionChanged": true,
+  "saveCachePreserved": true
+}

@@ -1,0 +1,18 @@
+{
+  "checks": [
+    "A01 new and v52 save finance preserved",
+    "A03 injury suspension duplicates and substitution ownership validated",
+    "A04 off goalkeeper and corner taker never act; emergency keeper announced",
+    "A03 fewer than seven eligible players forfeit safely",
+    "A05-A06 budget and loan wage burden use settlement values",
+    "A07 unknown scouting estimate independent of hidden PA",
+    "A08 full-market sort and nonoverlapping pages",
+    "A11 offer revalidates budget expiry and squad floor; valid deal settles",
+    "A12 execution responds to morale sharpness fit and coach",
+    "A13 medical rating accelerates recovery",
+    "A16 weekly development records actual attribute changes",
+    "A03 one-match ban served after fixture; A16 match stats settle",
+    "A12-A13 seeded full-match outcome consumes execution inputs"
+  ],
+  "matchSamples": {}
+}

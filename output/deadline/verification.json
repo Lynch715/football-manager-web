@@ -1,0 +1,32 @@
+{
+  "version": "v60",
+  "baseCommit": "9cedb568de7b76ab1924c06751732c8e92c3eb0c",
+  "htmlSHA256": "ab75a9b52fbb15c76bc57536479be92224a7437b2528f4a5e184ec714b572416",
+  "checks": 98,
+  "passed": true,
+  "suites": {
+    "completeFlow": 37,
+    "offerExpiry": 34,
+    "engine": 13,
+    "storage": 9,
+    "saveCompatibility": 3,
+    "fullSeasons": 2
+  },
+  "sourceAndPublishedFlowBothPassed": true,
+  "browser": {
+    "provider": "Codex In-app Browser",
+    "localCases": [
+      "summer quote accepted then next continue closes",
+      "winter previous-day match then deadline counter/accept and deadline match closes",
+      "390x844 summer loan accepted then next continue closes"
+    ],
+    "savingDisabled": true,
+    "physicalDeviceAcceptance": false
+  },
+  "unchangedResources": [
+    "data-real.js",
+    "96 crests"
+  ],
+  "saveFormatAndKeysUnchanged": true,
+  "originalArchivedSaveBytesUnchanged": true
+}

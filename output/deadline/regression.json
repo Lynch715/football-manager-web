@@ -1,0 +1,157 @@
+{
+  "file": "/private/tmp/fm-original-deadline-20261019/index.html",
+  "sha256": "ab75a9b52fbb15c76bc57536479be92224a7437b2528f4a5e184ec714b572416",
+  "passed": true,
+  "checks": 37,
+  "realAIAndDailyPipeline": true,
+  "results": [
+    {
+      "name": "夏窗 前日无赛/当日无赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日无赛/当日无赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日无赛/当日无赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日无赛/当日有赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日无赛/当日有赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日无赛/当日有赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日无赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日无赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日无赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日有赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日有赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 前日有赛/当日有赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日无赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日无赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日无赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日有赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日有赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日无赛/当日有赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日无赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日无赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日无赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日有赛 ai完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日有赛 pitch完整流程",
+      "pass": true
+    },
+    {
+      "name": "冬窗 前日有赛/当日有赛 loan完整流程",
+      "pass": true
+    },
+    {
+      "name": "夏窗 旧档直接31日先补报价且读回不重刷",
+      "pass": true
+    },
+    {
+      "name": "夏窗 截止日还价后接受",
+      "pass": true
+    },
+    {
+      "name": "夏窗 忽略与拒绝后再次继续关窗",
+      "pass": true
+    },
+    {
+      "name": "夏窗 新到价报价先留给玩家，继续后自动成交一次",
+      "pass": true
+    },
+    {
+      "name": "夏窗 最后一天新发起推销立即回复且可成交",
+      "pass": true
+    },
+    {
+      "name": "夏窗 旧档超出窗口有效期也在关窗时清理，关窗汇总不重复",
+      "pass": true
+    },
+    {
+      "name": "冬窗 旧档直接31日先补报价且读回不重刷",
+      "pass": true
+    },
+    {
+      "name": "冬窗 截止日还价后接受",
+      "pass": true
+    },
+    {
+      "name": "冬窗 忽略与拒绝后再次继续关窗",
+      "pass": true
+    },
+    {
+      "name": "冬窗 新到价报价先留给玩家，继续后自动成交一次",
+      "pass": true
+    },
+    {
+      "name": "冬窗 最后一天新发起推销立即回复且可成交",
+      "pass": true
+    },
+    {
+      "name": "冬窗 旧档超出窗口有效期也在关窗时清理，关窗汇总不重复",
+      "pass": true
+    },
+    {
+      "name": "普通日期不提前运行次日市场，到期日后报价仍清理",
+      "pass": true
+    }
+  ]
+}

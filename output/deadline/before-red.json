@@ -1,0 +1,19 @@
+{
+  "file": "/private/tmp/fm-original-deadline-20261019/index.html",
+  "sha256": "deb0b631d27099e6d49540f058a06e201a065661f2f56d8aea5d19142ae0070e",
+  "passed": false,
+  "checks": 2,
+  "realAIAndDailyPipeline": true,
+  "results": [
+    {
+      "name": "夏窗 旧档直接31日先补报价且读回不重刷",
+      "pass": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'day' !== 'deadline'\n\n    at arrive (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:27:10)\n    at /private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:45:59\n    at test (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:33:111)\n    at Object.<anonymous> (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:45:2)\n    at Module._compile (node:internal/modules/cjs/loader:1829:14)\n    at Module._extensions..js (node:internal/modules/cjs/loader:1969:10)\n    at Module.load (node:internal/modules/cjs/loader:1552:32)\n    at Module._load (node:internal/modules/cjs/loader:1354:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)"
+    },
+    {
+      "name": "冬窗 旧档直接31日先补报价且读回不重刷",
+      "pass": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'day' !== 'deadline'\n\n    at arrive (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:27:10)\n    at /private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:45:59\n    at test (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:33:111)\n    at Object.<anonymous> (/private/tmp/fm-original-deadline-20261019/qa/deadline/flow.cjs:45:2)\n    at Module._compile (node:internal/modules/cjs/loader:1829:14)\n    at Module._extensions..js (node:internal/modules/cjs/loader:1969:10)\n    at Module.load (node:internal/modules/cjs/loader:1552:32)\n    at Module._load (node:internal/modules/cjs/loader:1354:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)"
+    }
+  ]
+}
