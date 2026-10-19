@@ -4065,12 +4065,17 @@ function marketDaily(){
 }
 
 // ---------- 处理收到的报价 ----------
+// until 是最后一个有效日期：当天可处理，结束当天后清理；旧报价沿用 day+7。
+function offerExpiryDay(of){ return of.until ?? of.day+7; }
+function offerDateError(of){
+  if(!inTransferWindow()) return "转会窗已关闭";
+  return WORLD.day>offerExpiryDay(of)?"报价已过期":"";
+}
 function acceptOffer(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club), u=UC();
   const fail=why=>{toast(why,"bad");return false;};
-  if(!inTransferWindow()) return fail("转会窗已关闭");
+  const dateError=offerDateError(of); if(dateError) return fail(dateError);
   if(!p || !b || b.id===u.id || p.clubId!==u.id || !u.squad.includes(p.id) || p.loan) return fail("报价失效：球员已离队或处于租借中");
-  if((of.until??of.day+7)<=WORLD.day) return fail("报价已过期");
   if(b.squad.length>=30) return fail("报价失效：买家阵容已满 30 人");
   const rules=saleTerms(u,p); if(rules.blocked) return fail(rules.blocked);
   const wage=of.type==="loan"?p.wage*of.wageShare:of.wage||wageDemand(p,b);
@@ -4105,6 +4110,7 @@ function rejectOffer(i){
 }
 function counterOffer(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
+  const dateError=offerDateError(of); if(dateError){ toast(dateError,"bad"); return; }
   if(of.type==="loan"){ loanCounterDialog(i); return; }
   const sug=Math.round(of.fee*1.2/1e4)*1e4;
   openModal("向 "+esc(b.cn)+" 还价",
@@ -4114,6 +4120,7 @@ function counterOffer(i){
 }
 function submitCounter(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
+  const dateError=offerDateError(of); if(dateError){ toast(dateError,"bad"); return; }
   const v=fromCur($("#co-fee").value); if(!(v>of.fee)){ toast("要价需高于当前报价","bad"); return; }
   of.countered=true;
   const max=of.max||Math.round(of.fee*1.2);
@@ -4881,8 +4888,8 @@ function processDayEnd(day){
   if(dt.getDay()===1) weeklyTick();
   if(dt.getMonth()===2 && dt.getDate()===20 && !WORLD.youthDone){ WORLD.youthDone=true; youthIntake(); }
   autoSellRound();                  // 到价自动成交（留一天给竞价，所以放在报价过期之前）
-  // 报价过期（到期前始终可处理，不会被新报价顶掉）
-  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>((o.until!=null?o.until:o.day+7))>WORLD.day && inTransferWindow());
+  // 即将进入次日：到期日当天的手动处理和自动成交已完成，此时才清理。
+  if(WORLD.offers) WORLD.offers=WORLD.offers.filter(o=>offerExpiryDay(o)>WORLD.day && inTransferWindow());
 }
 
 /* 到价自动成交。不当场成交——留一天给别家竞价（竞价抬价 6~18% 仍有机会发生），
@@ -4890,7 +4897,7 @@ function processDayEnd(day){
 function autoSellRound(){
   if(!inTransferWindow()) return;
   const u=UC(), offs=WORLD.offers||[];
-  const ready=offs.filter(o=>o.type!=="loan" && o.atAsk && o.day<WORLD.day
+  const ready=offs.filter(o=>!offerDateError(o) && o.type!=="loan" && o.atAsk && o.day<WORLD.day
      && P(o.pid) && P(o.pid).autoSell && P(o.pid).clubId===u.id && !P(o.pid).loan);
   const byP={};
   ready.forEach(o=>{ if(!byP[o.pid] || o.fee>byP[o.pid].fee) byP[o.pid]=o; });
@@ -5590,6 +5597,7 @@ function doReturnEarly(pid){
 }
 function loanCounterDialog(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
+  const dateError=offerDateError(of); if(dateError){ toast(dateError,"bad"); return; }
   const opt=(v,cur,txt)=>`<option value="${v}" ${v===cur?"selected":""}>${txt}</option>`;
   openModal("修改租借条款 · "+esc(b.cn),
     `<div class="hint">${esc(b.cn)} 提出：${of.half?"至冬窗":"至赛季末"}、承担 ${Math.round(of.wageShare*100)}% 工资、出场 ≥${Math.round(of.minApps*100)}%${of.fee?`、租借费 ${money(of.fee)}`:""}。你可以改条款回给他们，要求越高越可能被拒；每份请求只能改一次。</div>
@@ -5601,6 +5609,7 @@ function loanCounterDialog(i){
 }
 function submitLoanCounter(i){
   const of=WORLD.offers[i]; if(!of) return; const p=P(of.pid), b=C(of.club);
+  const dateError=offerDateError(of); if(dateError){ toast(dateError,"bad"); return; }
   const t={wageShare:+$("#lc-share").value, half:$("#lc-half").value==="1", minApps:+$("#lc-min").value, fee:Math.max(0,Math.round(fromCur($("#lc-fee").value)/1e4)*1e4)};
   of.countered=true;
   let hard=0;
@@ -5947,16 +5956,17 @@ function vTransfer(v){
     const o=el("div","card"); o.innerHTML=`<h3>收到的报价 <span class="hint" style="font-weight:400">可接受、还价或拒绝；多家竞价时后来者通常出价更高</span></h3>`;
     offers.forEach((of,i)=>{
       const p=P(of.pid); if(!p) return; const b=C(of.club);
-      const left=Math.max(0,(of.until!=null?of.until:of.day+7)-WORLD.day);
+      const left=offerExpiryDay(of)-WORLD.day, dateError=offerDateError(of);
+      const expiryText=dateError || (left>0?`${left} 天后到期`:"今天到期");
       if(of.type==="loan"){
         const d=el("div"); d.style.cssText="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1d242e;flex-wrap:wrap";
         d.innerHTML=`${crestHTML(b)}<b>${esc(b.cn)}</b><span class="tag t-n">${LGS(b)}</span><span class="tag t-i">租借请求</span>
           <b style="cursor:pointer" onclick="showPlayer(${p.id})">${esc(p.cn)}</b><span class="tag t-${POS_GRP[p.pos]}">${POS_CN[p.pos]}</span>${p.wantsLoan?'<span class="tag t-w">希望外租</span>':''}
           <span style="flex:1"></span>
-          <span class="hint">${of.half?"至冬窗":"至赛季末"} · 承担 ${Math.round(of.wageShare*100)}% 工资${of.fee?` · 租借费 ${money(of.fee)}`:""}${of.minApps?` · 出场 ≥${Math.round(of.minApps*100)}%`:""} · ${left>0?`${left} 天后到期`:"今天到期"}</span>`;
+          <span class="hint">${of.half?"至冬窗":"至赛季末"} · 承担 ${Math.round(of.wageShare*100)}% 工资${of.fee?` · 租借费 ${money(of.fee)}`:""}${of.minApps?` · 出场 ≥${Math.round(of.minApps*100)}%`:""} · ${expiryText}</span>`;
         const acts=el("div"); acts.style.cssText="display:flex;gap:6px;margin-left:auto";
-        const acc=el("button","sm pri","接受"); acc.onclick=()=>acceptOffer(i); acts.appendChild(acc);
-        if(!of.countered){ const co=el("button","sm","改条款"); co.onclick=()=>loanCounterDialog(i); acts.appendChild(co); }
+        const acc=el("button","sm pri","接受"); acc.disabled=!!dateError; acc.onclick=()=>acceptOffer(i); acts.appendChild(acc);
+        if(!of.countered){ const co=el("button","sm","改条款"); co.disabled=!!dateError; co.onclick=()=>loanCounterDialog(i); acts.appendChild(co); }
         const rej=el("button","sm","拒绝"); rej.onclick=()=>rejectOffer(i); acts.appendChild(rej);
         d.appendChild(acts); o.appendChild(d); return;
       }
@@ -5968,9 +5978,9 @@ function vTransfer(v){
         ${of.atAsk?'<span class="tag t-ok">已到要价</span>':(p.listed?`<span class="tag t-w">低于要价 ${money(Math.max(0,sellPrice(p)-of.fee))}</span>`:'')}${of.pitched?'<span class="tag t-i">推销所得</span>':''}
         <span style="flex:1"></span>
         <b style="color:var(--acc);font-size:14px">${money(of.fee)}</b>
-        <span class="hint">身价 ${money(p.value)} · ${left>0?`${left} 天后到期`:"今天到期"}</span>`;
-      const acc=el("button","sm pri","接受"); acc.onclick=()=>acceptOffer(i); d.appendChild(acc);
-      if(!of.countered){ const co=el("button","sm","还价"); co.onclick=()=>counterOffer(i); d.appendChild(co); }
+        <span class="hint">身价 ${money(p.value)} · ${expiryText}</span>`;
+      const acc=el("button","sm pri","接受"); acc.disabled=!!dateError; acc.onclick=()=>acceptOffer(i); d.appendChild(acc);
+      if(!of.countered){ const co=el("button","sm","还价"); co.disabled=!!dateError; co.onclick=()=>counterOffer(i); d.appendChild(co); }
       const rej=el("button","sm","拒绝"); rej.onclick=()=>rejectOffer(i); d.appendChild(rej);
       o.appendChild(d);
     });
