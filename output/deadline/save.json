@@ -2,10 +2,8 @@
   "passed": true,
   "checks": 3,
   "legacy": {
-    "inputSHA256": "330836d78202ca441a18eca03c3454d3484510f41d997771857bde0aea3a2e6b",
-    "loadedSHA256": "330836d78202ca441a18eca03c3454d3484510f41d997771857bde0aea3a2e6b",
-    "financeSHA256": "50f90fc247fd9617156faee9d50d467e1f364ade430ea5b3de18c87c0db1efe4",
-    "squadSHA256": "6395dd91e0ccfef1c90712ab5f056bd3e8fe187c8cad8f4d5b91efe79192c0ce"
+    "financeSHA256": "ea5ec892f95a21d38e4ef6aef470f5e97578fb63221a06dbef06c0ad0cf22112",
+    "squadSHA256": "020e182a2b2d4403484369539dd0b24d03d230b4d6b0998f555b0541dbab6ebf"
   },
   "originalFileUnchanged": true,
   "results": [

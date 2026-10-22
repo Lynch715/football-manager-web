@@ -16,7 +16,8 @@ function reset(winter=false,kind='ai',previousMatch=false,deadlineMatch=false,ra
  if(kind==='ai')WORLD.interest=buyers.map(b=>({pid:p.id,club:b.id,heat:1,since:absDay()-10}));
  if(kind==='pitch')WORLD.pitches=[{pid:p.id,club:buyers[0].id,price:p.askPrice,day:end-1,due:end}];
  if(kind==='loan'){p.age=22;p.ca=150;p.listed=false;p.wantsLoan=true;for(const b of WORLD.clubs.filter(c=>c.id!==u.id&&c.rep>=55&&c.rep<=70&&c.squad.length<27)){b.finance.balance=1e12;b.finance.locked=0;b.finance.cap0=1e12;}}
- WORLD.fixtures=WORLD.fixtures.filter(f=>f.day!==end&&f.day!==end-1);const games=WORLD.fixtures.filter(f=>!f.played&&f.comp==='L'&&(f.home===u.id||f.away===u.id)&&f.day>end+1);assert(games.length>=2);
+ // 本测试直接跳到截止日前；移除历史赛程，避免把未踢的旧比赛误当成无赛日。
+ WORLD.fixtures=WORLD.fixtures.filter(f=>f.day>end);const games=WORLD.fixtures.filter(f=>!f.played&&f.comp==='L'&&(f.home===u.id||f.away===u.id)&&f.day>end+1);assert(games.length>=2);
  if(previousMatch)games[0].day=end-1;if(deadlineMatch)games[1].day=end;
  calls={};return {end,pid:p.id,u:u.id,kind,previousMatch,deadlineMatch,seed};
 }

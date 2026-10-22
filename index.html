@@ -1521,7 +1521,7 @@ function newWorld(seed, userClubEn){
     ver:2, pid:0, seed, season:2026, day:0, date:null,
     players:{}, clubs:[], leagues:[], cups:[], euro:null, euroQual:null,
     userClub:0, news:[], inbox:[], transferLog:[], history:[], wageLF:1, ctrSpread:1, valueV2:1, faFix1:1, finV3:1, wageFix2:1,
-    freeAgents:[], scoutReports:[], shortlist:[],
+    freeAgents:[], scoutReports:[], shortlist:[], playingTimeV1:1,
     settings:{speed:1, autoSub:true},
     started:false
   };
@@ -1724,6 +1724,7 @@ function buildSeason(){
   Object.values(WORLD.players).forEach(p=>{
     p.last={keyPasses:p.keyPasses||0,dribbles:p.dribbles||0,apps:p.apps,goals:p.goals,assists:p.assists,rt:p.apps?p.ratingSum/p.apps:0,motm:p.motm};
     p.apps=0;p.goals=0;p.assists=0;p.cleanSheet=0;p.ratingSum=0;p.motm=0;p.yellow=0;p.red=0;p.susp=0;p.form=[]; p.keyPasses=0; p.dribbles=0;
+    p.playingTime={season:WORLD.season,total:{minutes:0,available:0,games:0},clubs:{}};
   });
 
   // ---- 联赛 ----
@@ -1779,7 +1780,11 @@ function makePlayoffs(){
   });
   return out;
 }
-function ensurePlayoffs(){ if(!WORLD.playoffs) WORLD.playoffs=makePlayoffs(); return WORLD.playoffs; }
+function ensurePlayoffs(){
+  if(!WORLD.playoffs) WORLD.playoffs=[];
+  makePlayoffs().forEach(p=>{ if(!WORLD.playoffs.some(x=>x.nation===p.nation&&x.tier===p.tier)) WORLD.playoffs.push(p); });
+  return WORLD.playoffs;
+}
 // 下级联赛里打附加赛的名次（联赛页上色、玩法说明用）
 function poSeedsRange(fmt){ return fmt==="ITA"?[3,8] : fmt==="GER"?[3,3] : fmt==="FRA"?[3,5] : [3,6]; }
 function poHasUpper(fmt){ return fmt==="GER"||fmt==="FRA"; }
@@ -2012,7 +2017,7 @@ function cupPrize(cup, roundIdx){
 }
 function advanceCupRound(cup){
   const day=cup.days[cup.cur];
-  const ms=WORLD.fixtures.filter(f=>f.comp==="C"&&f.nation===cup.nation&&f.day===day&&f.played);
+  const ms=WORLD.fixtures.filter(f=>f.comp==="C"&&f.nation===cup.nation&&f.round===cup.cur+1&&f.played);
   let winners=ms.map(f=>winnerOf(f));
   const losers=ms.map(f=> winnerOf(f)===f.home? f.away : f.home);
   losers.forEach(id=>addMoney(C(id), cupPrize(cup,cup.cur), cup.name+cup.roundNames[cup.cur]+"奖金"));
@@ -2205,20 +2210,21 @@ function finalLine(fx){
 function competitionsDayEnd(day){
   playoffsDayEnd(day);
   WORLD.cups.forEach(cup=>{
-    if(cup.cur<6 && cup.days[cup.cur]===day){
-      const rem=WORLD.fixtures.some(f=>f.comp==="C"&&f.nation===cup.nation&&f.day===day&&!f.played);
-      if(!rem) advanceCupRound(cup);
+    if(cup.cur<6 && cup.winner==null && cup.days[cup.cur]<=day){
+      const round=WORLD.fixtures.filter(f=>f.comp==="C"&&f.nation===cup.nation&&f.round===cup.cur+1);
+      if(round.length && round.every(f=>f.played)) advanceCupRound(cup);
     }
   });
   if(!WORLD.euro) return;
   ["CL","EL"].forEach(code=>{
     const E=WORLD.euro[code];
-    const rem=WORLD.fixtures.some(f=>f.comp===code&&f.day===day&&!f.played);
+    if(!E) return;
+    const rem=WORLD.fixtures.some(f=>f.comp===code&&!f.played&&(E.stage==="G"?f.stage==="G":f.stage==="K"&&E.ko&&f.round===E.ko.round+1));
     if(rem) return;
-    if(E.stage==="G" && day===E.gdays[5]) euroSeedKnockout(E);
+    if(E.stage==="G" && day>=E.gdays[5]) euroSeedKnockout(E);
     else if(E.stage==="K" && E.ko){
-      if(E.ko.round<3 && day===E.kdays[E.ko.round][1]) euroResolveRound(E);
-      else if(E.ko.round===3 && day===E.finalDay){ const f=WORLD.fixtures.find(f=>f.comp===code&&f.stage==="K"&&f.round===4&&f.played); if(f) euroFinish(E,f); }
+      if(E.ko.round<3 && day>=E.kdays[E.ko.round][1]) euroResolveRound(E);
+      else if(E.ko.round===3 && day>=E.finalDay){ const f=WORLD.fixtures.find(f=>f.comp===code&&f.stage==="K"&&f.round===4&&f.played); if(f) euroFinish(E,f); }
     }
   });
 }
@@ -2919,6 +2925,8 @@ function news(title, body, cat){
 
 // ---------- 结果落地 ----------
 function applyResult(fx, M){
+  if(!fx || fx.played || !M || !M.done || M.h!==fx.home || M.a!==fx.away) return false;
+  recordPlayingTime(fx,M);                 // 先记录赛前可出场资格，再消耗停赛、写入新伤病
   fx.played=true; fx.hg=M.score[0]; fx.ag=M.score[1]; fx.pens=M.pens;
   fx.stats=[M.stats[0],M.stats[1]];
   fx.scorers=[[],[]];
@@ -2979,6 +2987,7 @@ function applyResult(fx, M){
   if(fx.comp==="C") { /* 杯赛晋级在当日统一处理 */ }
   fx.motm = M.motm? M.motm.id : null;
   fx.events = M.events.filter(e=>["goal","card","hurt","pen"].includes(e.type)||(M.forfeit&&e.type==="sys")).map(e=>({t:e.t,x:e.text,c:e.cls}));
+  return true;
 }
 
 // 外围队（只打欧战）没有联赛主场：按 17 个本国联赛主场折算门票，和转播一起分 10 期按月发
@@ -3139,7 +3148,47 @@ function weeklyTick(){
   boardReview();
 }
 
-function trainingShare(p,c){ const gp=c.seasonStats.p||0; return gp>=3?clamp(p.apps/gp,0,1.25):0.6; }
+// 分钟与可出场机会都按球员、球队、赛季记录；补时最多按一场 90 分钟计。
+function playingTimeOf(p){
+  if(!p.playingTime || p.playingTime.season!==WORLD.season)
+    p.playingTime={season:WORLD.season,total:{minutes:0,available:0,games:0},clubs:{}};
+  return p.playingTime;
+}
+function clubPlayingTime(p,c){
+  const u=playingTimeOf(p);
+  return u.clubs[c.id]||(u.clubs[c.id]={minutes:0,available:0,games:0});
+}
+function recordPlayingTime(fx,M){
+  [fx.home,fx.away].forEach((cid,side)=>{
+    const c=C(cid), men=new Map(M.teams[side].men.map(m=>[m.id,m]));
+    c.squad.forEach(id=>{
+      const p=P(id), m=men.get(id); if(!p) return;
+      if((p.injury>0 || p.susp>0) && !(m&&m.mins>0)) return;
+      const minutes=clamp(m?m.mins:0,0,90), u=playingTimeOf(p), row=clubPlayingTime(p,c);
+      [u.total,row].forEach(r=>{r.minutes+=minutes;r.available+=90;r.games++;});
+    });
+  });
+}
+function trainingShare(p,c){ const r=clubPlayingTime(p,c); return r.available?clamp(r.minutes/r.available,0,1):0.6; }
+function migratePlayingTime(){
+  if(WORLD.playingTimeV1) return;
+  const games=new Map();
+  WORLD.fixtures.filter(f=>f.played).forEach(f=>[f.home,f.away].forEach(id=>games.set(id,(games.get(id)||0)+1)));
+  Object.values(WORLD.players).forEach(p=>{
+    if(p.playingTime&&p.playingTime.season===WORLD.season) return;
+    const u=playingTimeOf(p), c=p.clubId>=0?C(p.clubId):null;
+    const count=c?games.get(c.id)||0:0, apps=Math.max(0,p.apps||0);
+    // 无法还原旧比赛分钟：仅历史部分沿用一次出场的原有信用，不伪造精确分钟。
+    u.total={minutes:Math.min(apps,Math.max(count,apps))*90,available:Math.max(count,apps)*90,games:Math.max(count,apps),legacy:true};
+    if(!c) return;
+    const moved=(p.joinedAbs>WORLD.season*400)||(WORLD.transferLog||[]).some(t=>t.pid===p.id&&t.s===WORLD.season&&t.d>0&&t.to===c.id);
+    const n=p.loan?Math.max(0,apps-(p.loan.startApps||0)):moved?0:Math.min(apps,count);
+    const g=p.loan?WORLD.fixtures.filter(f=>f.played&&f.day>=p.loan.startDay&&(f.home===c.id||f.away===c.id)).length:moved?0:count;
+    u.clubs[c.id]={minutes:Math.min(n,g)*90,available:g*90,games:g,legacy:true};
+    if(p.loan){p.loan.startMinutes=0;p.loan.startAvailable=0;}
+  });
+  WORLD.playingTimeV1=1;
+}
 function legendGrowthBoost(p,share){ return p.legend && p.age<28 && p.apps>0?1+clamp(share/0.65,0,1):1; }
 function legendGrowthText(p,c){
   if(!p.legend) return "常规成长";
@@ -3154,7 +3203,7 @@ function trainClub(c){
     if(p.injury>18) return;
     const ageF = p.age<=18?1.55: p.age<=20?1.35: p.age<=22?1.12: p.age<=24?0.85: p.age<=26?0.55: p.age<=28?0.30: p.age<=30?0.12:0.03;
     const coachF = 0.55 + c.coachRating*0.055;
-    const share = trainingShare(p,c);   // 赛季头几轮按中性算
+    const share = trainingShare(p,c);   // 尚无可出场机会时按中性算，之后按真实分钟
     const playF = p.age<=21? 0.45 + Math.min(1,share)*0.9 : 0.75 + share*0.45;   // 21 岁以下不上场就长不动
     const profF = 0.5 + (profOf(p)-1)/19*0.8;                                     // 职业素养 0.5~1.3
     const gap = Math.max(0,p.pa-p.ca);
@@ -3542,11 +3591,12 @@ function loanGames(p){
   const games=WORLD.fixtures.filter(f=>f.played && f.day>=L.startDay && (f.home===cid||f.away===cid)).length;
   const apps=Math.max(0,p.apps-(L.startApps||0)), goals=Math.max(0,p.goals-(L.startGoals||0));
   const rt = apps? (p.ratingSum-(L.startRatingSum||0))/apps : 0;
-  return {apps,games,goals,rt};
+  const row=clubPlayingTime(p,C(cid));
+  return {apps,games,goals,rt,minutes:Math.max(0,row.minutes-(L.startMinutes||0)),available:Math.max(0,row.available-(L.startAvailable||0))};
 }
 
 // 出场条款是否被借入队满足（样本太少时视为满足）
-function loanClauseMet(p){ const L=p.loan; if(!L||!L.minApps) return true; const g=loanGames(p); if(g.games<4) return true; return g.apps/g.games >= L.minApps; }
+function loanClauseMet(p){ const L=p.loan; if(!L||!L.minApps) return true; const g=loanGames(p); if(g.available<360) return true; return g.minutes/g.available >= L.minApps; }
 // 提前终止的补偿：剩余租期内对方承担那部分工资的 25%
 function loanBreakCost(p, byOwner){
   const L=p.loan; if(!L) return 0;
@@ -3565,7 +3615,8 @@ function loanPlayer(pid, toClubId, t){
   if(fee){ addMoney(owner, fee, `租借费 ${p.cn}`); addMoney(to, -fee, `租借费 ${p.cn}`); }
   p.loan={owner:owner.id, from:owner.id, to:toClubId, half:!!t.half, untilAbs:loanUntilAbs(!!t.half),
           wageShare: t.wageShare==null? 1 : t.wageShare, fee, minApps:t.minApps||0,
-          startApps:p.apps, startGoals:p.goals, startRatingSum:p.ratingSum, startDay:WORLD.day};
+          startApps:p.apps, startGoals:p.goals, startRatingSum:p.ratingSum, startDay:WORLD.day,
+          startMinutes:clubPlayingTime(p,to).minutes, startAvailable:clubPlayingTime(p,to).available};
   loanedOutOf(owner).push(pid);
   p.wantsLoan=false; p.listed=false; p.morale=clamp(p.morale+6,5,100);
   pushTransferLog({pid, name:p.cn, pos:p.pos, from:owner.id, to:toClubId, fee, loan:1});
@@ -3623,7 +3674,7 @@ function weeklyWages(c){
 
 // ---------- 外租：AI 规则 ----------
 function clubGames(c){ return WORLD.fixtures.filter(f=>f.played&&(f.home===c.id||f.away===c.id)).length; }
-function playShare(p){ const c=p.clubId>=0?C(p.clubId):null; if(!c) return 1; const g=clubGames(c); return g? p.apps/g : 1; }
+function playShare(p){ const r=playingTimeOf(p).total; return r.available?clamp(r.minutes/r.available,0,1):1; }
 // 同位置排名（1=最强）
 function posRank(c,p){ return c.squad.map(i=>P(i)).filter(q=>q.pos===p.pos).sort((a,b)=>b.ca-a.ca).indexOf(p)+1; }
 // 他去了这家俱乐部能不能首发：和对方同位置最强的比
@@ -3662,7 +3713,7 @@ function loanWeekly(){
   if(games>=8){
     u.squad.map(i=>P(i)).forEach(p=>{
       if(p.loan) return;
-      const share=p.apps/games;
+      const share=trainingShare(p,u);
       if(p.wantsLoan){
         if(share>=0.5){ p.wantsLoan=false; news(`${p.cn} 不再要求外租`,`${p.cn} 近来获得了稳定的出场时间，经纪人表示他愿意留下来竞争位置。`,"good"); }
         else p.morale=clamp(p.morale-2,5,100);
@@ -3689,7 +3740,7 @@ function aiLoanOffersToUser(){
   if(WORLD.offers.length>=10) return;
   const games=clubGames(u);
   const cands=u.squad.map(i=>P(i)).filter(p=>!p.loan && p.age<=24 && p.injury<=10 && !p.untouchable
-      && (p.wantsLoan || (games>=4 && p.apps/games<0.4)) && !WORLD.offers.some(o=>o.pid===p.id));
+      && (p.wantsLoan || (games>=4 && trainingShare(p,u)<0.4)) && !WORLD.offers.some(o=>o.pid===p.id));
   cands.forEach(p=>{
     let pr = p.wantsLoan? 0.12 : 0.035; if(isDeadline()) pr*=2;
     if(rnd()>pr) return;
@@ -4564,6 +4615,9 @@ function aiExtendContracts(){
   });
 }
 function endSeason(){
+  // 未完成赛程只恢复正常晋级流程，绝不能按实力抽签决定升降级。
+  competitionsDayEnd(WORLD.day);
+  if(!seasonReady()) return false;
   processLoanExpiry(true);                     // 外租球员先全部归队，再处理合同到期 / 退役
   const summary={season:WORLD.season, leagues:[], cups:WORLD.cups.map(c=>c.winner),
                  euro:{CL:WORLD.euro?WORLD.euro.CL.winner:null, EL:WORLD.euro?WORLD.euro.EL.winner:null}};
@@ -4622,13 +4676,7 @@ function endSeason(){
           C(id).board.conf=clamp(C(id).board.conf+(inFinal?10:5),0,100);
         });
         if(PO.up16!=null && win===PO.up16) C(PO.up16).board.conf=clamp(C(PO.up16).board.conf+8,0,100);
-      } else {
-        // 兜底（附加赛没打完就结算，比如老存档恰好卡在赛季末）：按阵容实力模拟
-        const po=[lower[2].id,lower[3].id,lower[4].id,lower[5].id];
-        const s1=poGame(po[0],po[3]), s2=poGame(po[1],po[2]);
-        win=poGame(s1,s2); promoted.push(win);
-        relegated=upper.slice(-3).map(r=>r.id);
-      }
+      } else { throw new Error("附加赛尚未完成，不能结算升降级"); }
       moves.push({nation:ni, tier, promoted, relegated, poWin:win});
     }
   });
@@ -4786,6 +4834,7 @@ function endSeason(){
   setBoardExpectation();
   if(u.squad.length>30) news("归队后阵容超员，请安排去留",
     `目前一线队 ${u.squad.length} 人，超过引援人数上限 ${u.squad.length-30} 人。所有未到期、未退役球员均已保留，不会因超员被自动解约。你可以出售或外租球员；降至 30 人以下后才能继续买入或租入。`,"warn");
+  return true;
 }
 // 升降级衔接。此时 lg.clubIds 还是上赛季名单（buildSeason 才重排）：上级联赛去掉降级队 = 留守队
 function bridgeTiers(moves){
@@ -4861,7 +4910,7 @@ function poGame(a,b){
 let CURMATCH=null;      // 正在进行的用户比赛
 
 function userFixtureOn(day){
-  return WORLD.fixtures.find(f=>f.day===day && !f.played && (f.home===WORLD.userClub||f.away===WORLD.userClub));
+  return WORLD.fixtures.filter(f=>f.day<=day && !f.played && (f.home===WORLD.userClub||f.away===WORLD.userClub)).sort((a,b)=>a.day-b.day)[0];
 }
 function nextUserFixture(){
   return WORLD.fixtures.filter(f=>!f.played&&(f.home===WORLD.userClub||f.away===WORLD.userClub))
@@ -4870,9 +4919,9 @@ function nextUserFixture(){
 
 // 模拟当天所有（非用户）比赛
 function simDay(day, skipUser){
-  const fx=WORLD.fixtures.filter(f=>f.day===day && !f.played);
+  const fx=WORLD.fixtures.filter(f=>f.day<=day && !f.played).sort((a,b)=>a.day-b.day);
   fx.forEach(f=>{
-    if(skipUser && (f.home===WORLD.userClub||f.away===WORLD.userClub)) return;
+    if(f.home===WORLD.userClub||f.away===WORLD.userClub) return;
     [f.home,f.away].forEach(id=>{ const c=C(id); if(c.id!==WORLD.userClub) autoPickLineup(c); });
     const M=runMatch(createMatch(f.home,f.away,{comp:f.comp, round:f.round, record:false, ...knockoutOpts(f)}));
     applyResult(f,M);
@@ -4943,25 +4992,41 @@ function advance(){
   if(prepareDeadlineMarket()) return {t:"deadline"};
   const uf=userFixtureOn(WORLD.day);
   if(uf) return {t:"match", fx:uf};
-  simDay(WORLD.day,false);
+  simDay(WORLD.day,true);
   processDayEnd(WORLD.day);
   WORLD.day++;
-  if(WORLD.day>=SEASON_DAYS || allFixturesDone()){ WORLD.youthDone=false; endSeason(); return {t:"season"}; }
+  if(seasonReady() && endSeason()){ WORLD.youthDone=false; return {t:"season"}; }
   prepareDeadlineMarket();
   return {t:"day"};
 }
 function allFixturesDone(){ return !WORLD.fixtures.some(f=>!f.played); }
+function seasonReady(){
+  return allFixturesDone() && WORLD.cups.every(c=>c.winner!=null)
+    && Object.values(WORLD.euro||{}).every(e=>e.winner!=null)
+    && ensurePlayoffs().every(p=>p.done&&p.winner!=null);
+}
+function fixtureForMatch(M){
+  if(!M) return null;
+  if(M.fixture) return WORLD.fixtures.includes(M.fixture)&&!M.fixture.played&&M.fixture.home===M.h&&M.fixture.away===M.a&&M.fixture.comp===M.comp&&M.fixture.round===M.round&&fixtureKey(M.fixture)===M.fixtureKey?M.fixture:null;
+  const fx=WORLD.fixtures.filter(f=>!f.played&&f.day<=WORLD.day&&f.home===M.h&&f.away===M.a);
+  const exact=fx.filter(f=>f.comp===M.comp&&(!M.round||f.round===M.round));
+  return exact.length===1?exact[0]:!M.round&&fx.length===1?fx[0]:null;
+}
+function fixtureKey(f){ return JSON.stringify([f.day,f.home,f.away,f.comp,f.lg,f.nation,f.po,f.stage,f.grp,f.round,f.leg,f.tie]); }
 
 // 用户比赛结束后收尾
 function finishUserMatch(){
   const M=CURMATCH;
-  const fx=WORLD.fixtures.find(f=>f.day===WORLD.day && !f.played && (f.home===M.h&&f.away===M.a));
-  if(fx) applyResult(fx,M);
-  simDay(WORLD.day,false);
+  const fx=fixtureForMatch(M);
+  if(!M || !M.done || !fx || fx.day>WORLD.day || !(fx.home===WORLD.userClub||fx.away===WORLD.userClub)) throw new Error("比赛未完成或对应赛程已失效");
+  if(!applyResult(fx,M)) throw new Error("比赛结果未能结算");
+  CURMATCH=null;
+  simDay(WORLD.day,true);
+  if(userFixtureOn(WORLD.day)) return "pending";
   processDayEnd(WORLD.day);
   WORLD.day++;
   CURMATCH=null;
-  if(WORLD.day>=SEASON_DAYS || allFixturesDone()){ WORLD.youthDone=false; endSeason(); return "season"; }
+  if(seasonReady() && endSeason()){ WORLD.youthDone=false; return "season"; }
   prepareDeadlineMarket();
   return "ok";
 }
@@ -6278,7 +6343,7 @@ function submitBid(pid){
   }
   if(wg < need*0.92){ toast(`${p.cn} 认为薪资不足，要求 ${money(need)}/周`,"bad"); closeModal(); return; }
   // 球员意愿：声望差
-  if(seller && seller.rep > c.rep+14 && rnd()<0.6){ toast(`${p.cn} 不愿加盟——认为这是职业生涯的倒退`,"bad"); closeModal(); return; }
+  if(seller && !playerAcceptsMove(p,c,seller,wg,need)){ toast(`${p.cn} 不愿加盟——认为这是职业生涯的倒退`,"bad"); closeModal(); return; }
   // 抢手球员：报价仅略高于要价时，可能被更大的俱乐部截胡
   if(seller && !relegationGrace(p) && fee < ask*1.08 && (perfIndex(p)>=0.35 || p.ca>seller.rep*1.9) && rnd()<0.14){
     const rivals=WORLD.clubs.filter(r=>r.id!==c.id && r.id!==seller.id && r.rep>c.rep+3 && r.squad.length<29
@@ -6295,6 +6360,15 @@ function submitBid(pid){
   transferPlayer(pid, c.id, fee, wg, yr);
   news(`签下 ${p.cn}`,`${c.cn} ${isFA?"免签":"以 "+money(fee)} 从 ${seller?seller.cn:"自由市场"} 签下 ${p.cn}，签约 ${yr} 年，周薪 ${money(wg)}。`,"good");
   toast(`签约成功：${p.cn}`); closeModal(); render();
+}
+// 同一窗口、同一买卖双方的意愿固定；微调报价、换币种、读档和隔日重试不重抽。
+// 实质加薪会改善同一意愿判断，声望变化或下一转会窗也可改变结果。
+function playerAcceptsMove(p,c,seller,wage,need){
+  if(seller.rep<=c.rep+14) return true;
+  const key=[WORLD.seed,p.id,c.id,seller.id,winKey(),c.rep,seller.rep].join("|");
+  const roll=hashStr("move-willingness|"+key)/4294967296;
+  const bonus=Math.floor(Math.max(0,wage/Math.max(1,need)-1)*10+1e-8);
+  return roll>=Math.max(0.15,0.6-bonus*0.10);
 }
 function renewContract(pid){
   const p=P(pid), c=UC();
@@ -6997,9 +7071,12 @@ const PHASE_MS=230;
 
 function startUserMatch(fx){
   // 防御：同一场比赛已有未结算的实例，不重开（重开会重掷随机结果）
-  if(CURMATCH && CURMATCH.h===fx.home && CURMATCH.a===fx.away){ VIEW="match"; render(); return; }
+  if(CURMATCH){ VIEW="match"; render(); return; }
+  if(!WORLD.fixtures.includes(fx)||fx.played||fx.day>WORLD.day||!(fx.home===WORLD.userClub||fx.away===WORLD.userClub)) return;
   const side = fx.home===WORLD.userClub?0:1;
   CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round, record:true, userSide:side, ...knockoutOpts(fx)});
+  CURMATCH.fixture=fx;
+  CURMATCH.fixtureKey=fixtureKey(fx);
   CURMATCH.subMode=autoSubPref();
   ANIM={raf:0,playing:false,speed:(WORLD.settings&&WORLD.settings.matchSpeed)||1,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false,trail:[],cap:null};
   VIEW="match"; render();
@@ -7628,6 +7705,7 @@ function adoptWorld(obj){
 // 旧存档迁移：重算工资预算（旧公式对小球会过紧），并把自由球员的旧合同周薪刷新为市场期望
 function migrateWorld(){
   if(!WORLD) return;
+  migratePlayingTime();
   /* v45~v48 建的世界里真实球员合同一律到 2028，第二季末会集体到期。电脑队的打散到 2028~2031（不缩短，免得当季突然到期）；
      玩家自己的人不动，交给合同提醒。*/
   if(!WORLD.ctrSpread){

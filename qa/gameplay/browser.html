@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>足球经理游戏性修复验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   const args=new URLSearchParams(location.search),scene=args.get('scene')||'same-day';
+   await ensureRealData();
+   if(scene==='legacy')adoptWorld(await(await fetch('qa/gameplay/fixtures/legacy-world.json')).json());else newWorld(20261022,'Coventry City');
+   SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);let info={scene,initialDay:WORLD.day};
+   if(scene==='same-day'){
+    const games=WORLD.fixtures.filter(f=>f.comp==='L'&&(f.home===WORLD.userClub||f.away===WORLD.userClub)).slice(0,3);WORLD.day=games[0].day;games[1].day=WORLD.day;games[2].day=WORLD.day+7;WORLD.fixtures=games;info.initialDay=WORLD.day;
+    info.fixtures=games.slice();
+   }
+   if(scene==='transfer'){
+    const u=UC();while(u.squad.length>=30)toFreeAgent(P(u.squad.at(-1)),u);u.finance.balance=1e12;u.finance.rev0=1e12;u.finance.cap0=1e12;u.finance.locked=0;
+    const p=Object.values(WORLD.players).find(p=>p.clubId>=0&&C(p.clubId).rep>u.rep+14&&!saleTerms(C(p.clubId),p).blocked);const s=C(p.clubId),need=wageDemand(p,u);while(playerAcceptsMove(p,u,s,need,need))WORLD.seed++;
+    p.askPrice=null;info.pid=p.id;info.seller=s.id;info.player=p.cn;info.wage=need;info.fee=Math.ceil(Math.max(askingPrice(p)*1.2,saleTerms(s,p).fee||0));info.cash=u.finance.balance;info.logs=WORLD.transferLog.length;
+   }
+   let days=0;const dayEnd=processDayEnd;processDayEnd=function(...a){days++;return dayEnd(...a)};
+   const paint=render;render=function(){paint();let node=document.getElementById('gameplay-proof');if(!node){node=document.createElement('script');node.id='gameplay-proof';node.type='application/json';document.body.appendChild(node)}node.textContent=JSON.stringify({scene,day:WORLD.day,season:WORLD.season,user:WORLD.userClub,dailySettlements:days,initialDay:info.initialDay,fixtures:info.fixtures&&info.fixtures.map(f=>({day:f.day,home:f.home,away:f.away,played:f.played})),currentMatch:CURMATCH&&{home:CURMATCH.h,away:CURMATCH.a,done:CURMATCH.done},savingEnabled:SAVE_ENABLED,minutesVersion:WORLD.playingTimeV1,player:info.pid&&{id:info.pid,club:P(info.pid).clubId,seller:info.seller,fee:info.fee,wage:info.wage,cash:UC().finance.balance,initialCash:info.cash,logs:WORLD.transferLog.length,initialLogs:info.logs}})};
+   VIEW='home';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   if(scene==='transfer'){makeBid(info.pid);}
+  }catch(e){const p=document.createElement('pre');p.id='gameplay-error';p.textContent=e.stack;document.body.appendChild(p);console.error(e)}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

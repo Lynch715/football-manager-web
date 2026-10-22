@@ -71,7 +71,7 @@ for(const winter of [false,true]){
   for(const match of [false,true])test(label+(match?' 赛后推进':' 无比赛推进')+'至最后一天后可处理报价',()=>{
     const x=reset(winter);WORLD.day=x.end-1;
     // 只安排指定路径；模拟和每日市场处理继续调用真实引擎。
-    WORLD.fixtures=WORLD.fixtures.filter(f=>f.day!==WORLD.day);const future=WORLD.fixtures.some(f=>!f.played&&f.day>WORLD.day);assert(future);
+    WORLD.fixtures=WORLD.fixtures.filter(f=>f.day>WORLD.day);const future=WORLD.fixtures.some(f=>!f.played&&f.day>WORLD.day);assert(future);
     if(match){
       const fx={day:WORLD.day,home:x.u.id,away:x.b.id,comp:'L',round:1,played:false,hg:0,ag:0};WORLD.fixtures.push(fx);
       assert.equal(advance().t,'match');CURMATCH=runMatch(createMatch(fx.home,fx.away,{record:false,comp:'L',round:1}));
@@ -81,7 +81,7 @@ for(const winter of [false,true]){
     const i=WORLD.offers.indexOf(x.o);assert.equal(acceptOffer(i),true,messages.join(';'));
   });
   test(label+' 截止日结束后清空报价',()=>{
-    const x=reset(winter);WORLD.fixtures=WORLD.fixtures.filter(f=>f.day!==WORLD.day);prepareDeadlineMarket();assert.equal(advance().t,'day');
+    const x=reset(winter);WORLD.fixtures=WORLD.fixtures.filter(f=>f.day>WORLD.day);prepareDeadlineMarket();assert.equal(advance().t,'day');
     assert.equal(WORLD.day,x.end+1);assert.equal(inTransferWindow(),false);assert.equal(WORLD.offers.length,0);
   });
 }
