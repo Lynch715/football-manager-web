@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "browser": "Codex In-app Browser",
+  "url": "http://127.0.0.1:8769/qa/growth/browser.html",
+  "scene": "independent generated world; saving disabled",
+  "newcomerFirstSeasonPotential": 68,
+  "adultStartingAge": 23,
+  "adultTrainingWeeks": 88,
+  "adultAbilityBefore": 71.5,
+  "adultAbilityAfter": 83,
+  "uiChecked": [
+    "youth",
+    "training"
+  ],
+  "screenshot": "browser-youth.png",
+  "productionSaveTouched": false,
+  "physicalDeviceTested": false
+}

@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><title>球员成长修复验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};saveGame=async()=>{};autosave=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261023,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const opening=new URLSearchParams(location.search).get('scene')==='opening';
+   if(!opening){WORLD.day=Math.round((new Date(WORLD.season+1,2,20)-dateOf(0))/864e5);youthIntake();}
+   VIEW=opening?'home':'youth';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const panel=document.createElement('div');panel.id='growth-qa';panel.style='position:fixed;bottom:8px;right:8px;z-index:9999;max-width:380px;background:#112b25;color:#fff;padding:12px;border:1px solid #d9b969;border-radius:8px;font-size:13px';
+   const result=document.createElement('div');result.textContent='独立测试世界 · 存档写入已关闭';panel.appendChild(result);
+   const button=document.createElement('button');button.textContent='核验新人首季与成年成长';button.hidden=opening;panel.appendChild(button);document.body.appendChild(panel);
+   button.onclick=()=>{
+    const before=JSON.stringify(WORLD),random=rnd;try{
+     const c=UC(),p=c.squad.map(P).find(q=>q.createdAbs===absDay()&&q.age<=17);const pa=p.pa;
+     WORLD.day=310;p.age++;p.playingTime={season:WORLD.season,total:{minutes:0,available:810,games:9},clubs:{}};
+     rnd=()=>0;prospectFate(p);if(p.pa!==pa)throw Error('新人潜力被短样本改变');rnd=random;
+     p.age=23;p.pa=170;p.ca0=85;fitAttrsToOverall(p.a,p.pos,140);p.ca=calcCA(p.a,p.pos);p.dev=0;p.injury=0;p.prof=14;
+     const ca=p.ca;c.squad=[p.id];c.coachRating=14;c.trainIntensity=2;c.trainFocus='balanced';
+     const u=playingTimeOf(p);u.clubs[c.id]={minutes:2736,available:3420,games:38};
+     for(let i=0;i<88;i++)trainClub(c);
+     if(p.ca<=ca)throw Error('成年成长未继续');result.textContent=`通过：新人首季潜力保持 ${Math.round(pa/2)}；23岁球员88周能力 ${ca/2} → ${p.ca/2}；存档写入关闭。`;
+     result.dataset.passed='true';
+    }catch(e){result.textContent='失败：'+e.message;result.dataset.passed='false';}
+    finally{rnd=random;adoptWorld(JSON.parse(before));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);render();}
+   };
+  }catch(e){document.body.appendChild(document.createElement('pre')).textContent=e.stack;}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

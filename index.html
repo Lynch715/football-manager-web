@@ -1205,12 +1205,11 @@ function genAttrs(lvl,pos){
   return A;
 }
 
-// 成长天花板：球员从出道能力 ca0 出发，16 到 26 岁之间逐步释放 pa-ca0 这段空间。
-// 普通球员按原曲线开放；传奇更早释放青年成长空间，22 岁开放全部潜力。
+// 成长空间须在兑现窗口结束前开放：普通球员 23 岁、传奇 22 岁开放全部潜力。
 function devCap(p){
   const base = (p.ca0!=null? p.ca0 : p.ca);
   const age=p.age!=null?p.age:24;
-  const f = p.legend?clamp((age-14)/8,0.25,1):clamp((age-15.5)/10.5,0.05,1);
+  const f = p.legend?clamp((age-14)/8,0.25,1):clamp((age-14)/9,0.15,1);
   return base + (p.pa-base)*f + p.pa*0.03;      // 末尾 3% 是余量，免得曲线太规整
 }
 // 职业素养（隐藏，1~20）：同样的潜力，能兑现多少看它。大多数人 8~14。
@@ -1221,27 +1220,36 @@ function profTxt(p){ const v=profOf(p);
   return v>=17?'<b style="color:var(--acc)">极其职业</b>' : v>=14?'训练刻苦' : v>=9?'正常' :
          v>=6?'<span style="color:var(--warn)">态度一般</span>' : '<span style="color:var(--bad)">态度散漫</span>'; }
 
-// 季末（年龄 +1 之后）调用：成长窗口关闭 + 23 岁以下的停滞 / 后程发力
-const GAP_LOSS={24:0.25,25:0.40,26:0.55};
+// 新人不足半年不做年度评估；旧档缺少出道日期时从升级日开始观察，不臆造全年经历。
+function developmentDays(p){
+  const start=Math.max(p.createdAbs??-Infinity,p.developmentReviewAbs??-Infinity);
+  return Number.isFinite(start)?clamp(absDay()-start,0,WORLD.day):WORLD.day;
+}
+// 季末（年龄 +1 之后）调用。28 岁起温和收拢未兑现空间，保留成年阶段的培养机会。
+const GAP_LOSS={28:0.12,29:0.22,30:0.35};
 function prospectFate(p){
   const pr=profOf(p);
+  const days=developmentDays(p);
+  if(days<180) return;
   const own = p.clubId>=0 && p.clubId===WORLD.userClub;
   const sl = (WORLD.shortlist||[]).find(x=>x.id===p.id);
   const showNum = own || (sl && sl.know>=95);
-  // 传奇保留到 27 岁的兑现窗口，28 岁起才自然折损；普通球员维持原规则。
-  const fadeAge=p.age-(p.legend?4:0);
-  if(fadeAge>=24){
+  if(p.age>=28){
     const gap=p.pa-p.ca;
-    if(gap>4){ const k=(fadeAge>=27?0.7:GAP_LOSS[fadeAge])*(1.25-pr*0.025);
+    if(gap>4){ const k=(p.age>=31?0.5:GAP_LOSS[p.age])*(1.25-pr*0.025);
       p.pa=Math.max(p.ca, Math.round(p.pa-gap*k)); }
+    p.value=calcValue(p);
   }
   if(p.age>24) return;
+  const sample=playingTimeOf(p).total;
+  if(sample.games<12) return;                 // 少量比赛不足以判断一年是否发展停滞
   const sh=clamp(playShare(p),0,1);
-  const stallP=0.085*(1.6-pr*0.06)*(sh<0.3?1.5:sh>0.6?0.7:1);
-  const bloomP=0.03*(0.4+pr*0.06)*(sh>0.6?1.4:sh<0.3?0.5:1);
+  const exposure=clamp(days/300,0,1);
+  const stallP=0.035*(1.6-pr*0.06)*(sh<0.3?1.5:sh>0.6?0.7:1)*exposure;
+  const bloomP=0.03*(0.4+pr*0.06)*(sh>0.6?1.4:sh<0.3?0.5:1)*exposure;
   const r=rnd(), a=p.pa;
   if(r<stallP && p.pa-p.ca>=6){
-    p.pa=Math.max(p.ca+2, p.pa-ri(14,34));
+    p.pa=Math.max(p.ca+2, p.pa-ri(4,12));
     const why = sh<0.3? "这一年上场太少，" : pr<8? "训练里不太上心，" : "";
     if(own) news(`${p.cn} 发展停滞`,`助教的年度报告：${p.cn}${why}进步比预想的慢。教练组把对他的预期从 ${Math.round(a/2)} 下调到 ${Math.round(p.pa/2)}。`,"bad");
     else if(sl) news(`球探简报：${p.cn} 不如预期`,`球探跟了 ${p.cn} 一年，觉得他${why}没长成当初看好的样子，评估已经下调。`,"warn");
@@ -1353,7 +1361,7 @@ function makePlayer(lvl, pos, age, clubId){
     contract:0, wage:0, value:0,
     apps:0, goals:0, assists:0, cleanSheet:0, ratingSum:0, motm:0, yellow:0, red:0, susp:0,
     careerApps:0, careerGoals:0,
-    homegrown: false, form:[]
+    homegrown: false, form:[], createdAbs:absDay()
   };
   p.ca=calcCA(A,pos);
   p.prof=genProf();
@@ -1447,7 +1455,7 @@ function makeRealPlayer(row, clubId){
     contract:WORLD.season+(age>32? ri(0,2) : ri(1,4)), wage:0, value:0,
     apps:0, goals:0, assists:0, cleanSheet:0, ratingSum:0, motm:0, yellow:0, red:0, susp:0,
     careerApps:0, careerGoals:0,
-    homegrown:false, form:[], realData:true
+    homegrown:false, form:[], realData:true, createdAbs:absDay()
   };
   p.pa=Math.max(p.pa,p.ca); p.prof=genProf();
   // 副位置去掉与主位置相同的项
@@ -1521,7 +1529,7 @@ function newWorld(seed, userClubEn){
     ver:2, pid:0, seed, season:2026, day:0, date:null,
     players:{}, clubs:[], leagues:[], cups:[], euro:null, euroQual:null,
     userClub:0, news:[], inbox:[], transferLog:[], history:[], wageLF:1, ctrSpread:1, valueV2:1, faFix1:1, finV3:1, wageFix2:1,
-    freeAgents:[], scoutReports:[], shortlist:[], playingTimeV1:1,
+    freeAgents:[], scoutReports:[], shortlist:[], playingTimeV1:1, developmentV2:1,
     settings:{speed:1, autoSub:true},
     started:false
   };
@@ -3262,6 +3270,18 @@ function recordPlayingTime(fx,M){
   });
 }
 function trainingShare(p,c){ const r=clubPlayingTime(p,c); return r.available?clamp(r.minutes/r.available,0,1):0.6; }
+function migrateDevelopment(){
+  if(WORLD.developmentV2) return;
+  Object.values(WORLD.players).forEach(p=>{
+    if(p.createdAbs==null && p.developmentReviewAbs==null) p.developmentReviewAbs=absDay();
+    // 老版青训历史无法区分入队前机会，放弃不可信的培养分母；出场次数与生涯数据照旧。
+    if(p.homegrown && p.age<=18 && p.playingTime?.total?.legacy){
+      p.playingTime={season:WORLD.season,total:{minutes:0,available:0,games:0},clubs:{}};
+      if(p.loan){p.loan.startMinutes=0;p.loan.startAvailable=0;}
+    }
+  });
+  WORLD.developmentV2=1;
+}
 function migratePlayingTime(){
   if(WORLD.playingTimeV1) return;
   const games=new Map();
@@ -3293,13 +3313,14 @@ function trainClub(c){
     const p=P(id);
     const before={ca:p.ca,a:{...p.a}};
     if(p.injury>18) return;
-    const ageF = p.age<=18?1.55: p.age<=20?1.35: p.age<=22?1.12: p.age<=24?0.85: p.age<=26?0.55: p.age<=28?0.30: p.age<=30?0.12:0.03;
+    const ageF = p.age<=18?1.55: p.age<=20?1.35: p.age<=22?1.12: p.age<=24?1.05: p.age<=26?0.90: p.age<=28?0.65: p.age<=30?0.30:0.03;
     const coachF = 0.55 + c.coachRating*0.055;
     const share = trainingShare(p,c);   // 尚无可出场机会时按中性算，之后按真实分钟
-    const playF = p.age<=21? 0.45 + Math.min(1,share)*0.9 : 0.75 + share*0.45;   // 21 岁以下不上场就长不动
+    const playF = p.age<=21? 0.25 + share*1.2 : 0.30 + share;   // 成年阶段同样需要比赛锻炼
     const profF = 0.5 + (profOf(p)-1)/19*0.8;                                     // 职业素养 0.5~1.3
     const gap = Math.max(0,p.pa-p.ca);
-    let gain = gap*0.0052*ageF*coachF*playF*profF*inten*(0.55+p.a.workrate/22)*(0.7+rnd()*0.7);
+    // 以属性提升为单位：接近上限时仍保留少量训练进展，避免余量越小越永久停滞。
+    let gain = (gap>0?Math.max(gap,12):0)*0.009*ageF*coachF*playF*profF*inten*(0.55+p.a.workrate/22)*(0.7+rnd()*0.7);
     gain *= legendGrowthBoost(p,share);                 // 传奇加成由出场带动；不出场不额外加速
     if(p.loan){                                        // 租到低级别：出场多但对手弱，成长打折
       const o=C(p.loan.owner);
@@ -3311,7 +3332,7 @@ function trainClub(c){
     if(p.age>=30) gain -= (p.age-29)*0.055*(1.15-p.a.stamina*0.012);
     if(p.injury>0) gain*=0.25;
     p.dev=(p.dev||0)+gain;
-    while(p.dev>=1){ p.dev-=1; bumpAttr(p,focus.a,+1,c); }
+    while(p.dev>=1){ if(!bumpAttr(p,focus.a,+1,c)){p.dev=Math.min(p.dev,1);break;} p.dev-=1; }
     while(p.dev<=-1){ p.dev+=1; bumpAttr(p,null,-1,c); }
     p.value=calcValue(p);
     p.trainingLast={day:WORLD.day,ca:p.ca-before.ca,attrs:Object.keys(p.a).filter(k=>p.a[k]!==before.a[k]).map(k=>({k,delta:p.a[k]-before.a[k]}))};
@@ -3326,21 +3347,27 @@ function bumpAttr(p,focusList,dir,club){
     for(const k in w) for(let i=0;i<w[k];i++) pool.push(k);
     if(focusList) focusList.forEach(k=>{ for(let i=0;i<7;i++) pool.push(k); });
     if(p.pos==="GK") for(const k in ATTRS_GK) for(let i=0;i<3;i++) pool.push(k);
-    pool=pool.filter(k=>p.a[k]<20);
+    const allowed=new Set([...new Set(pool)].filter(k=>{
+      if(p.a[k]>=20) return false;
+      p.a[k]++; const nc=calcCA(p.a,p.pos); p.a[k]--;
+      return nc<=p.pa && nc<=devCap(p);
+    }));
+    pool=pool.filter(k=>allowed.has(k));
   } else {
     // 衰退优先身体属性
     ["pace","accel","agility","stamina","jumping","strength"].forEach(k=>{ for(let i=0;i<4;i++) pool.push(k); });
     for(const k in w) pool.push(k);
     pool=pool.filter(k=>p.a[k]>1);
   }
-  if(!pool.length) return;
+  if(!pool.length) return false;
   const k=pick(pool);
   p.a[k]=clamp(p.a[k]+dir,1,20);
   const nc=calcCA(p.a,p.pos);
-  if(dir>0 && (nc>p.pa || nc>devCap(p))) { p.a[k]-=dir; return; }
+  if(dir>0 && (nc>p.pa || nc>devCap(p))) { p.a[k]-=dir; return false; }
   p.ca=nc;
   if(dir>0 && club && club.id===WORLD.userClub && rnd()<0.06)
     news(`${p.cn} 状态提升`,`训练报告：${p.cn} 的「${ALL_ATTRS[k]}」提升到 ${p.a[k]}。`,"good");
+  return true;
 }
 
 // ---------- 董事会 ----------
@@ -6055,7 +6082,7 @@ function remapLineup(c, newForm){
 /* ================= 训练 ================= */
 function vTraining(v){
   const c=UC();
-  v.appendChild(el("div","",`<h1>训练</h1><div class="sub">教练评级 ${c.coachRating}/20 · 队医 ${c.physioRating}/20 · 训练强度影响成长速度与受伤风险</div>`));
+  v.appendChild(el("div","",`<h1>训练</h1><div class="sub">教练评级 ${c.coachRating}/20 · 队医 ${c.physioRating}/20 · 训练强度影响成长速度与受伤风险<br>普通球员 23 岁开放全部成长空间，23—27 岁仍可持续提升；28 岁起逐步收拢未兑现潜力。</div>`));
   if(c.squad.some(id=>P(id)?.legend)) v.appendChild(el("div","card",`<b style="color:var(--gold)">传奇培养</b><div class="hint" style="line-height:1.8;margin-top:5px">传奇在青年阶段更早开放成长空间。28 岁前，出场可带动额外训练成长，倍率最高 ×2；无出场记录没有额外加速，教练、训练强度和伤病仍影响发展。年龄引起的未兑现潜力折损延后至 28 岁。</div>`));
   const g=el("div","grid2");
   const f=el("div","card"); f.innerHTML="<h3>训练重点</h3>";
@@ -6103,7 +6130,7 @@ function vTraining(v){
 /* ================= 青训 ================= */
 function vYouth(v){
   const c=UC();
-  v.appendChild(el("div","",`<h1>青训学院</h1><div class="sub">青训评级 ${c.youthRating}/20 · 每年 3 月输送新一批年轻球员</div>`));
+  v.appendChild(el("div","",`<h1>青训学院</h1><div class="sub">青训评级 ${c.youthRating}/20 · 每年 3 月输送新一批年轻球员<br>只统计入队后的可出场机会；观察不足半年或有效机会不足 12 场，不做年度潜力升降评估。</div>`));
   const yy=c.squad.map(i=>P(i)).filter(p=>p.age<=20).sort((a,b)=>b.pa-a.pa);
   const card=el("div","card"); card.innerHTML=`<h3>U21 球员（${yy.length} 人）</h3>`;
   if(!yy.length) card.appendChild(el("div","empty","目前没有年轻球员"));
@@ -7800,6 +7827,7 @@ function adoptWorld(obj){
 function migrateWorld(){
   if(!WORLD) return;
   migratePlayingTime();
+  migrateDevelopment();
   Object.values(WORLD.players).forEach(p=>disciplineOf(p));
   refreshSuspensions();
   /* v45~v48 建的世界里真实球员合同一律到 2028，第二季末会集体到期。电脑队的打散到 2028~2031（不缩短，免得当季突然到期）；
@@ -8027,7 +8055,8 @@ function vHelp(v){
     <div class="card"><h3>转会与球探</h3>
       <div style="line-height:1.85">转会窗在 <b>8 月</b>与 <b>1 月</b>开启。<br>
       • 对手球员的属性默认不可见，加入<b>球探名单</b>后情报逐日积累，45% 可见属性和训练态度、95% 可见真实潜力<br>
-      • 潜力只是上限，不是终点。年轻球员能兑现多少，看出场时间、训练态度和伤病；24 岁以后没长出来的那段会逐年作废，27 岁基本定型<br>
+      • 潜力是成长上限。出场时间、训练态度、教练和伤病影响兑现速度；普通球员 23 岁开放全部成长空间，23—27 岁仍可持续提升，28 岁起才逐步下调未兑现的潜力<br>
+      • 新人只统计入队后的可出场机会；观察不足半年或有效机会不足 12 场，不做年度潜力升降评估<br>
       • 报价需同时满足卖方价格、球员薪资要求与俱乐部声望；位置紧缺时可按报价框提示，以普通要价的 1.5–2 倍谈判，必要人数与位置覆盖不足时需等对方补员<br>
       • 降级核心先挂牌，夏窗前 7 天可先行考察和报价，8 月 8 日起 AI 参与竞争；在转会页点击「查看降级挂牌」寻找机会<br>
       • 外租归队后超过 30 人不会自动解约，由你安排出售或外租；人数降至 30 人以下才能继续买入或租入<br>

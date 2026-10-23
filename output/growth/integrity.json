@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "sourceAndPublishOnlyFiveResourceDeclarationsDiffer": true,
+  "sourceSha256": "59075636442632d50395688b905510f9571eaf61ed19303da85804e90c097602",
+  "publishSha256": "09390ecdb5c51f38b9cca4ecd1dde22d2741bf3867563b5d60f768661400ca4f",
+  "resourceLines": [
+    811,
+    813,
+    814,
+    817,
+    818
+  ]
+}

@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8"><title>成长版本旧档只读验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const raw=await readSave();if(!raw)throw Error('未找到现有存档');
+   const original=JSON.parse(raw),club=original.clubs[original.userClub];
+   const hash=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+   const beforeHash=await hash(raw);
+   const download=(s,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([s],{type:'application/json'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
+   const box=document.createElement('div');box.id='preserve-panel';box.style='position:fixed;top:12px;right:12px;z-index:9999;background:#112b25;color:white;padding:16px;border:1px solid #d9b969;border-radius:8px;max-width:420px;font-size:13px';
+   const text=document.createElement('div');text.textContent=`只读验收：${club.cn} · ${original.season}/${String(original.season+1).slice(2)} · 第 ${original.day} 天。自动存档写入关闭。`;box.appendChild(text);
+   const report={club:club.cn,season:original.season,day:original.day,beforeSHA256:beforeHash,savingEnabled:false};
+   function button(label,fn){const b=document.createElement('button');b.textContent=label;b.onclick=fn;box.appendChild(b);return b;}
+   button('备份原始存档',()=>download(raw,'fm-v63-original-raw.json'));
+   button('只读载入旧档并检查',async()=>{try{
+    const expected=JSON.parse(raw);
+    if(!expected.developmentV2){
+     for(const p of Object.values(expected.players)){
+      if(p.createdAbs==null&&p.developmentReviewAbs==null)p.developmentReviewAbs=expected.season*400+expected.day;
+      if(p.homegrown&&p.age<=18&&p.playingTime?.total?.legacy){p.playingTime={season:expected.season,total:{minutes:0,available:0,games:0},clubs:{}};if(p.loan){p.loan.startMinutes=0;p.loan.startAvailable=0;}}
+     }
+     expected.developmentV2=1;
+    }
+    adoptWorld(JSON.parse(raw));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+    report.exactExpectedMigration=JSON.stringify(WORLD)===JSON.stringify(expected);
+    if(!report.exactExpectedMigration)throw Error('迁移超出预期');
+    const once=JSON.stringify(WORLD);adoptWorld(JSON.parse(once));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+    report.idempotent=JSON.stringify(WORLD)===once;
+    VIEW='training';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+    report.afterSHA256=await hash(await readSave());report.originalBytesUnchanged=report.afterSHA256===beforeHash;
+    report.passed=report.exactExpectedMigration&&report.idempotent&&report.originalBytesUnchanged;
+    text.textContent=`${report.passed?'通过':'失败'}：旧档载入正常，仅增加预期迁移；重复载入一致；原始存档 SHA-256 ${report.originalBytesUnchanged?'未变':'改变'}；${club.cn} · ${original.season}/${String(original.season+1).slice(2)} · 第 ${original.day} 天。存档写入关闭。`;
+   }catch(e){report.passed=false;text.textContent='失败：'+e.message;}finally{SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);}});
+   button('复核并导出原始存档',async()=>{const now=await readSave();report.afterSHA256=await hash(now);report.originalBytesUnchanged=report.afterSHA256===beforeHash;download(now,'fm-v63-original-reread.json');text.textContent=`复核：原始存档字节${report.originalBytesUnchanged?'一致':'不一致'}，${club.cn}，第 ${original.day} 天；存档写入关闭。`;});
+   button('下载验收报告',()=>download(JSON.stringify(report,null,2),'fm-v63-save-verification.json'));
+   document.getElementById('loadscr').style.display='none';document.body.appendChild(box);
+  }catch(e){document.body.appendChild(document.createElement('pre')).textContent=e.stack;}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>
