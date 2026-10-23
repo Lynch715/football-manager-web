@@ -2,6 +2,8 @@
   "passed": true,
   "checks": 3,
   "legacy": {
+    "inputSHA256": "c7c230909e95d545323716f124d28ff8cc094f71ec58a403c3c2da942b75baab",
+    "loadedSHA256": "c7c230909e95d545323716f124d28ff8cc094f71ec58a403c3c2da942b75baab",
     "financeSHA256": "ea5ec892f95a21d38e4ef6aef470f5e97578fb63221a06dbef06c0ad0cf22112",
     "squadSHA256": "020e182a2b2d4403484369539dd0b24d03d230b4d6b0998f555b0541dbab6ebf"
   },

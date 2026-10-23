@@ -2,7 +2,7 @@
   "passed": true,
   "checks": 17,
   "source": "index.html",
-  "sha256": "fac791badcce53b726c9931e93bd0f429527384024fea6bfe75c9f6b59833c30",
+  "sha256": "8da088a0b1ad89d2f99548d5c6b8119612b17a2cb75a054206f241aa10050cc2",
   "results": [
     {
       "name": "同日本队双赛依次处理，日结只运行一次，结果不重复入账",

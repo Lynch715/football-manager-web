@@ -1723,7 +1723,8 @@ function buildSeason(){
   WORLD.clubs.forEach(c=>{ c.lg=lgIndex(c.nation,c.tier); c.seasonStats={p:0,w:0,d:0,l:0,gf:0,ga:0,pts:0}; c.form=[]; c.euro=null; });
   Object.values(WORLD.players).forEach(p=>{
     p.last={keyPasses:p.keyPasses||0,dribbles:p.dribbles||0,apps:p.apps,goals:p.goals,assists:p.assists,rt:p.apps?p.ratingSum/p.apps:0,motm:p.motm};
-    p.apps=0;p.goals=0;p.assists=0;p.cleanSheet=0;p.ratingSum=0;p.motm=0;p.yellow=0;p.red=0;p.susp=0;p.form=[]; p.keyPasses=0; p.dribbles=0;
+    p.apps=0;p.goals=0;p.assists=0;p.cleanSheet=0;p.ratingSum=0;p.motm=0;p.yellow=0;p.red=0;p.form=[]; p.keyPasses=0; p.dribbles=0;
+    const discipline=disciplineOf(p); discipline.yellow={}; discipline.season=WORLD.season;
     p.playingTime={season:WORLD.season,total:{minutes:0,available:0,games:0},clubs:{}};
   });
 
@@ -1758,6 +1759,7 @@ function buildSeason(){
   // ---- 欧战 ----
   buildEuro();
   WORLD.fixtures.sort((a,b)=>a.day-b.day);
+  refreshSuspensions();
 }
 
 
@@ -2263,14 +2265,56 @@ function playerScore(p,pos){
   const sh=0.85+0.15*(p.sharp/100);
   return p.ca*fit*cond*mor*sh;
 }
+// susp 继续供现有界面显示当前赛事的停赛数；真实处罚按赛事分别保存。
+function disciplineOf(p){
+  let d=p.discipline;
+  if(!d || d.v!==1){
+    const legacy=Math.max(0,Number(p.susp)||0);
+    d=p.discipline={v:1,season:WORLD.season,yellow:{},bans:{},legacy,projected:legacy};
+  } else if(Number.isFinite(p.susp) && p.susp!==d.projected){
+    // 兼容旧存档/旧调用方直接写 susp，不把投影重复计入赛事处罚。
+    d.legacy=Math.max(0,d.legacy+p.susp-d.projected); d.projected=p.susp;
+  }
+  return d;
+}
+function clubCompetition(c){
+  if(CURMATCH && !CURMATCH.done && (CURMATCH.h===c.id||CURMATCH.a===c.id)) return CURMATCH.comp;
+  let next=null;
+  (WORLD.fixtures||[]).forEach(f=>{if(!f.played&&(f.home===c.id||f.away===c.id)&&(!next||f.day<next.day))next=f;});
+  return next?next.comp:"L";
+}
+function suspensionFor(p,comp){ const d=disciplineOf(p); return d.legacy+(d.bans[comp||"L"]||0); }
+function projectClubSuspensions(c,comp){
+  c.squad.map(P).filter(Boolean).forEach(p=>{ const d=disciplineOf(p); p.susp=d.legacy+(d.bans[comp]||0); d.projected=p.susp; });
+}
+function refreshSuspensions(){
+  if(!WORLD) return;
+  const next=new Map();
+  (WORLD.fixtures||[]).forEach(f=>{if(!f.played)[f.home,f.away].forEach(id=>{const old=next.get(id);if(!old||f.day<old.day)next.set(id,f);});});
+  WORLD.clubs.forEach(c=>{
+    const live=CURMATCH&&!CURMATCH.done&&(CURMATCH.h===c.id||CURMATCH.a===c.id);
+    projectClubSuspensions(c,live?CURMATCH.comp:next.get(c.id)?.comp||"L");
+  });
+}
+function serveSuspension(p,comp){
+  const d=disciplineOf(p);
+  if(d.legacy>0)d.legacy--;else if(d.bans[comp]>0)d.bans[comp]--;
+}
+function recordDiscipline(p,comp,m){
+  const d=disciplineOf(p);
+  if(m.yellow)d.yellow[comp]=(d.yellow[comp]||0)+1;
+  if(m.red)d.bans[comp]=(d.bans[comp]||0)+ri(1,3);
+  else if(m.yellow&&d.yellow[comp]%5===0)d.bans[comp]=(d.bans[comp]||0)+1;
+}
 // 只修补名单：踢掉已离队/伤停的人，补上空缺，替补席补到 7 人，
 // 其余保持玩家自己的安排不动（转会、解约时用这个，别用 autoPickLineup）
-function repairLineup(club,strict){
+function repairLineup(club,strict,comp){
+  comp=comp||clubCompetition(club);
   // 注意用 squad 判在队与否：transferPlayer 里 clubId 是后设置的，只查 clubId 会漏掉刚卖掉的人
   const inSquad=new Set(club.squad);
-  const ok=id=>{ const p=P(id); return p && inSquad.has(id) && (!strict||p.clubId===club.id) && p.injury<=0 && p.susp<=0; };
+  const ok=id=>{ const p=P(id); return p && inSquad.has(id) && (!strict||p.clubId===club.id) && p.injury<=0 && suspensionFor(p,comp)<=0; };
   const slots=FORMATIONS[club.tactic.formation];
-  if(!club.lineup || club.lineup.length!==slots.length){ autoPickLineup(club); return; }
+  if(!club.lineup || club.lineup.length!==slots.length){ autoPickLineup(club,comp); return; }
   const used=new Set();
   club.lineup=club.lineup.map(id=> ok(id)&&!used.has(id)? (used.add(id),id) : null);
   club.subs=(club.subs||[]).filter(id=> ok(id) && !used.has(id) && (used.add(id),true));
@@ -2290,9 +2334,10 @@ function repairLineup(club,strict){
   }
   for(const id of rest){ if(club.subs.length>=BENCH_MAX) break; if(used.has(id)) continue; club.subs.push(id); used.add(id); }
 }
-function autoPickLineup(club){
+function autoPickLineup(club,comp){
+  comp=comp||clubCompetition(club);
   const slots=FORMATIONS[club.tactic.formation];
-  const avail=club.squad.filter(id=>{const p=P(id); return p && p.clubId===club.id && p.injury<=0 && p.susp<=0;});
+  const avail=club.squad.filter(id=>{const p=P(id); return p && p.clubId===club.id && p.injury<=0 && suspensionFor(p,comp)<=0;});
   const used=new Set(), lineup=[];
   // 先门将
   slots.forEach((s,si)=>{ lineup[si]=null; });
@@ -2357,7 +2402,8 @@ function createMatch(homeId, awayId, opts){
   };
   [homeId,awayId].forEach((cid,side)=>{
     const club=C(cid);
-    repairLineup(club,true);
+    projectClubSuspensions(club,M.comp);
+    repairLineup(club,true,M.comp);
     const slots=FORMATIONS[club.tactic.formation];
     const arr=[];
     club.lineup.forEach((pid,i)=>{
@@ -2828,7 +2874,7 @@ function doSub(M,side,outMan,inPid){
   if(!canSub(M,side)) return false;
   const T=M.teams[side], p=P(inPid);
   if(!p || !T.club.squad.includes(inPid) || !T.club.subs.includes(inPid) || p.clubId!==T.cid
-     || p.injury>0 || p.susp>0 || T.benchUsed.includes(inPid) || T.men.some(m=>m.id===inPid)
+     || p.injury>0 || suspensionFor(p,M.comp)>0 || T.benchUsed.includes(inPid) || T.men.some(m=>m.id===inPid)
      || !T.men.includes(outMan) || outMan.red || outMan.subDone || (outMan.off&&!outMan.injured)) return false;
   const slots=FORMATIONS[T.form];
   const w=slotWorld(slots[outMan.slot][1],slots[outMan.slot][2],side);
@@ -2873,7 +2919,7 @@ function aiSubs(M){
       out=cands.reduce((b,m)=>m.cond<b.cond?m:b);
     }
     const club=C(T.cid);
-    const bench=club.subs.filter(id=>!T.benchUsed.includes(id)&&P(id)&&P(id).injury<=0&&P(id).susp<=0);
+    const bench=club.subs.filter(id=>!T.benchUsed.includes(id)&&P(id)&&P(id).injury<=0&&suspensionFor(P(id),M.comp)<=0);
     if(!bench.length) return;
     const slots=FORMATIONS[T.form], want=slots[out.slot][0];
     let bestId=null,bs=-1;
@@ -2904,16 +2950,47 @@ function endMatch(M){
   M.motm=best;
   const agg0=M.score[0]+(M.aggBase?M.aggBase[0]:0), agg1=M.score[1]+(M.aggBase?M.aggBase[1]:0);
   if(M.knockout && agg0===agg1){
-    // 点球大战
-    let p=[0,0];
-    for(let i=0;i<5;i++){ if(rnd()<0.75)p[0]++; if(rnd()<0.75)p[1]++; }
-    while(p[0]===p[1]){ if(rnd()<0.75)p[0]++; if(rnd()<0.75)p[1]++; }
-    M.pens=p;
-    addEvent(M,"sys",`点球大战 ${p[0]}-${p[1]}，${C(p[0]>p[1]?M.h:M.a).cn} 晋级`,"sys");
+    if(!M.forfeit){
+      const p=runShootout(M);
+      addEvent(M,"sys",`点球大战 ${p[0]}-${p[1]}，${C(p[0]>p[1]?M.h:M.a).cn} 晋级`,"sys");
+    }
   }
   addEvent(M,"sys",`—— 全场结束  ${C(M.h).short} ${M.score[0]} : ${M.score[1]} ${C(M.a).short} ——`,"sys");
 }
 function runMatch(M){ let guard=0; while(!M.done && guard++<20000) stepMatch(M); return M; }
+function shootoutSkill(m){ return att(m,"finishing")*0.45+att(m,"composure")*0.35+att(m,"setpiece")*0.20; }
+function shootoutChance(taker,keeper){
+  const keeping=att(keeper,"reflex")*0.6+att(keeper,"oneonone")*0.4;
+  return clamp(0.74+(shootoutSkill(taker)-10)*0.014-(keeping-10)*0.010,0.35,0.94);
+}
+function runShootout(M){
+  const keepers=[activeKeeper(M,0),activeKeeper(M,1)];
+  let pools=M.teams.map(T=>T.men.filter(m=>!m.off&&!m.red&&!m.injured).sort((a,b)=>shootoutSkill(b)-shootoutSkill(a)||a.id-b.id));
+  const n=Math.min(...pools.map(p=>p.length));
+  if(!n || keepers.some(k=>!k)) throw new Error("没有可参加点球大战的球员");
+  pools=pools.map((pool,side)=>{
+    const selected=pool.slice(0,n),gk=keepers[side];
+    if(!selected.includes(gk)){selected.pop();selected.push(gk);selected.sort((a,b)=>shootoutSkill(b)-shootoutSkill(a)||a.id-b.id);}
+    return selected;
+  });
+  const score=[0,0],attempts=[0,0];M.shootout=[];
+  const kick=(side,forced)=>{
+    const taker=pools[side][attempts[side]%n],keeper=keepers[1-side],probability=shootoutChance(taker,keeper);
+    const scored=forced==null?rnd()<probability:forced;attempts[side]++;if(scored)score[side]++;
+    M.shootout.push({side,pid:taker.id,keeper:keeper.id,probability,scored,attempt:attempts[side]});
+  };
+  for(let i=0;i<10;i++){
+    kick(i%2);
+    if(score[0]>score[1]+5-attempts[1] || score[1]>score[0]+5-attempts[0]){M.pens=score;return score;}
+  }
+  for(let round=0;score[0]===score[1]&&round<100;round++){kick(0);kick(1);}
+  if(score[0]===score[1]){
+    // 极端随机序列的终止保护：按下一轮一进一失的条件概率取样，仍读取双方属性。
+    const a=shootoutChance(pools[0][attempts[0]%n],keepers[1]),b=shootoutChance(pools[1][attempts[1]%n],keepers[0]);
+    const homeWins=rnd()<a*(1-b)/(a*(1-b)+b*(1-a));kick(0,homeWins);kick(1,!homeWins);
+  }
+  M.pens=score;return score;
+}
 /* =========================================================
    推进：日程 / 训练 / 成长 / 伤病 / 转会 / 财政 / 赛季结算
    ========================================================= */
@@ -2949,7 +3026,7 @@ function applyResult(fx, M){
   else addMoney(H, gate, "门票收入 vs "+A.short);
   fx.attendance=att0; FIN_CLK++;
   // 停赛须在本场踢完后消耗，不能在开赛当天提前解除。
-  [H,A].forEach(c=>c.squad.map(P).filter(p=>p&&p.susp>0).forEach(p=>p.susp--));
+  [H,A].forEach(c=>c.squad.map(P).filter(Boolean).forEach(p=>serveSuspension(p,fx.comp)));
   // 球员数据结算
   M.teams.forEach((T,side)=>{
     const conceded=M.score[1-side];
@@ -2962,8 +3039,8 @@ function applyResult(fx, M){
       p.form.push(m.rating); if(p.form.length>6)p.form.shift();
       if(conceded===0 && p.pos==="GK" && m.mins>60) p.cleanSheet++;
       if(m.yellow) p.yellow++;
-      if(m.red){ p.red++; p.susp += ri(1,3); }
-      else if(p.yellow>0 && p.yellow%5===0 && m.yellow) p.susp+=1;
+      if(m.red)p.red++;
+      recordDiscipline(p,fx.comp,m);
       p.sharp=clamp(p.sharp + (m.mins>60?6:m.mins>20?3:0),0,100);
       // 士气
       const res = M.score[side]-M.score[1-side];
@@ -2987,6 +3064,8 @@ function applyResult(fx, M){
   if(fx.comp==="C") { /* 杯赛晋级在当日统一处理 */ }
   fx.motm = M.motm? M.motm.id : null;
   fx.events = M.events.filter(e=>["goal","card","hurt","pen"].includes(e.type)||(M.forfeit&&e.type==="sys")).map(e=>({t:e.t,x:e.text,c:e.cls}));
+  if(M.shootout)fx.shootout=M.shootout.map(k=>({...k}));
+  [H,A].forEach(c=>projectClubSuspensions(c,clubCompetition(c)));
   return true;
 }
 
@@ -3085,16 +3164,29 @@ function aiInvest(c){
 // 伤病内部按基准康复工作量记录，界面显示当前医疗条件下的预计日数。
 function recoveryRate(p){ const phys=p.clubId>=0?(C(p.clubId).physioRating||10):10; return clamp(1+(phys-10)*0.025,0.8,1.25); }
 function injuryDays(p){ return Math.ceil(Math.max(0,p.injury-(p.injRecovery||0))/recoveryRate(p)); }
+function recoverInjury(p,days,notify){
+  if(!(p.injury>0) || !(days>0)) return;
+  const work=(p.injRecovery||0)+recoveryRate(p)*days,recovered=Math.floor(work);
+  p.injRecovery=work-recovered;p.injury=Math.max(0,p.injury-recovered);
+  if(p.injury===0){p.injRecovery=0;p.condition=Math.min(p.condition,55);p.sharp=Math.max(20,p.sharp-25);
+    if(notify && ownerOf(p)===WORLD.userClub) news(`${p.cn} 伤愈`,`${p.cn} 已恢复健康，可以重新参加${p.loan?"租借球队的":""}训练。`,"good");}
+}
+function offseasonDays(){ return Math.max(0,Math.round((Date.UTC(WORLD.season+1,7,1)-Date.UTC(WORLD.season,7,1+WORLD.day))/86400000)); }
+function offseasonRecovery(p,days){
+  const injured=p.injury>0,healingDays=injured?injuryDays(p):0;
+  recoverInjury(p,days,false);
+  const condition=ri(70,92),sharp=ri(45,70);
+  if(p.injury>0){p.condition=Math.min(p.condition,55);p.sharp=Math.min(p.sharp,45);}
+  else if(injured){const healthy=Math.max(0,days-healingDays);p.condition=Math.min(condition,55+healthy*5);p.sharp=Math.min(sharp,p.sharp+healthy*2);}
+  else {p.condition=condition;p.sharp=sharp;}
+}
 // ---------- 每日 ----------
 function dailyTick(){
   const d=WORLD.day;
   tickProjects();
   Object.values(WORLD.players).forEach(p=>{
     if(p.injury>0){
-      p.injRecovery=(p.injRecovery||0)+recoveryRate(p);
-      const recovered=Math.floor(p.injRecovery); p.injRecovery-=recovered; p.injury=Math.max(0,p.injury-recovered);
-      if(p.injury===0){ p.injRecovery=0; p.condition=Math.min(p.condition,55); p.sharp=Math.max(20,p.sharp-25);
-      if(ownerOf(p)===WORLD.userClub) news(`${p.cn} 伤愈`,`${p.cn} 已恢复健康，可以重新参加${p.loan?"租借球队的":""}训练。`,"good"); } }
+      recoverInjury(p,1,true); }
     else {
       const c=p.clubId>=0?C(p.clubId):null;
       const phys=c?c.physioRating:10;
@@ -3163,7 +3255,7 @@ function recordPlayingTime(fx,M){
     const c=C(cid), men=new Map(M.teams[side].men.map(m=>[m.id,m]));
     c.squad.forEach(id=>{
       const p=P(id), m=men.get(id); if(!p) return;
-      if((p.injury>0 || p.susp>0) && !(m&&m.mins>0)) return;
+      if((p.injury>0 || suspensionFor(p,fx.comp)>0) && !(m&&m.mins>0)) return;
       const minutes=clamp(m?m.mins:0,0,90), u=playingTimeOf(p), row=clubPlayingTime(p,c);
       [u.total,row].forEach(r=>{r.minutes+=minutes;r.available+=90;r.games++;});
     });
@@ -4618,6 +4710,7 @@ function endSeason(){
   // 未完成赛程只恢复正常晋级流程，绝不能按实力抽签决定升降级。
   competitionsDayEnd(WORLD.day);
   if(!seasonReady()) return false;
+  const restDays=offseasonDays();
   processLoanExpiry(true);                     // 外租球员先全部归队，再处理合同到期 / 退役
   const summary={season:WORLD.season, leagues:[], cups:WORLD.cups.map(c=>c.winner),
                  euro:{CL:WORLD.euro?WORLD.euro.CL.winner:null, EL:WORLD.euro?WORLD.euro.EL.winner:null}};
@@ -4737,7 +4830,7 @@ function endSeason(){
         toFreeAgent(p, c);
       }
     }
-    p.condition=ri(70,92); p.sharp=ri(45,70); p.injury=0; p.susp=0;
+    offseasonRecovery(p,restDays);
     p.value=calcValue(p);
   });
   if(leftUser.length) news(`${leftUser.length} 名球员合同到期离队`,`以下球员合同到期，已以自由身离开：\n${leftUser.join("\n")}`,"warn");
@@ -4922,7 +5015,7 @@ function simDay(day, skipUser){
   const fx=WORLD.fixtures.filter(f=>f.day<=day && !f.played).sort((a,b)=>a.day-b.day);
   fx.forEach(f=>{
     if(f.home===WORLD.userClub||f.away===WORLD.userClub) return;
-    [f.home,f.away].forEach(id=>{ const c=C(id); if(c.id!==WORLD.userClub) autoPickLineup(c); });
+    [f.home,f.away].forEach(id=>{ const c=C(id); if(c.id!==WORLD.userClub) autoPickLineup(c,f.comp); });
     const M=runMatch(createMatch(f.home,f.away,{comp:f.comp, round:f.round, record:false, ...knockoutOpts(f)}));
     applyResult(f,M);
   });
@@ -5127,6 +5220,7 @@ function renderTop(){
    原来每次 render 都 scrollTop=0，手机上筛完要再滑回去。 */
 let LAST_VIEW=null;
 function render(){
+  refreshSuspensions();
   markDirty();
   renderNav(); renderTop();
   const v=$("#view");
@@ -7706,6 +7800,8 @@ function adoptWorld(obj){
 function migrateWorld(){
   if(!WORLD) return;
   migratePlayingTime();
+  Object.values(WORLD.players).forEach(p=>disciplineOf(p));
+  refreshSuspensions();
   /* v45~v48 建的世界里真实球员合同一律到 2028，第二季末会集体到期。电脑队的打散到 2028~2031（不缩短，免得当季突然到期）；
      玩家自己的人不动，交给合同提醒。*/
   if(!WORLD.ctrSpread){

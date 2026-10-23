@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>足球经理规则修复验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261022,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const u=UC(),op=WORLD.clubs.find(c=>c.id!==u.id),pid=u.lineup[1],p=P(pid);disciplineOf(p).bans.L=2;
+   const cup={day:10,home:u.id,away:op.id,comp:'C',round:1,nation:u.nation,played:false,hg:0,ag:0},league={...cup,day:11,comp:'L',lg:u.lg};
+   WORLD.fixtures=[cup,league];WORLD.day=10;const start=createMatch,finish=endMatch;
+   // 测试场景固定为最后一分钟和杯赛平局，以稳定覆盖原版点球结算分支。
+   createMatch=function(...args){const m=start(...args);m.t=89;m.half=2;m.addedTime=1;m.teams.forEach(t=>t.men.forEach(x=>x.mins=89));return m;};
+   endMatch=function(m){if(m.comp==='C'){m.score=[0,0];m.teams.forEach(t=>t.men.forEach(x=>{x.goals=0;x.assists=0;}));}return finish(m);};
+   const paint=render;render=function(){paint();let node=document.getElementById('rules-proof');if(!node){node=document.createElement('script');node.id='rules-proof';node.type='application/json';document.body.appendChild(node);}node.textContent=JSON.stringify({scenario:'synthetic-last-minute-cup-draw',savingEnabled:SAVE_ENABLED,day:WORLD.day,player:{id:pid,name:p.cn,susp:p.susp,discipline:p.discipline},fixtures:WORLD.fixtures.map(f=>({comp:f.comp,played:f.played,pens:f.pens,shootout:f.shootout})),match:CURMATCH&&{comp:CURMATCH.comp,done:CURMATCH.done,pens:CURMATCH.pens,shootout:CURMATCH.shootout,rosters:CURMATCH.teams.map(t=>t.men.map(x=>x.id))}});};
+   VIEW='home';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+  }catch(e){const p=document.createElement('pre');p.id='rules-error';p.textContent=e.stack;document.body.appendChild(p);console.error(e);}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

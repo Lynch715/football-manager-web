@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "startedFromLegacySave": true,
+  "allGamesUsedActualEngine": true,
+  "delayedPlayoffDay": 307,
+  "lastDay": 308,
+  "restDays": 57,
+  "injuryBefore": 120,
+  "injuryAfter": 63,
+  "remainingInjuryPreserved": true,
+  "unservedBansPreserved": true,
+  "saveIdempotent": true
+}

@@ -3,7 +3,7 @@ newWorld(20261019,'Coventry City');const start=WORLD.season,records=[],daily=new
 for(const [name,map] of [['dailyTick',daily],['marketDaily',markets]]){const fn=global[name];global[name]=function(...args){const k=WORLD.season+':'+WORLD.day;map.set(k,(map.get(k)||0)+1);assert.equal(map.get(k),1,name+' ran twice on '+k);return fn(...args)}}
 for(let season=start;season<start+2;season++){
  let guard=0;const m=matches;
- while(WORLD.season===season){assert(++guard<650,'calendar stalled');const r=advance();assert.notEqual(r.t,'over');if(r.t==='match'){autoPickLineup(UC());CURMATCH=runMatch(createMatch(r.fx.home,r.fx.away,{record:false,userSide:r.fx.home===WORLD.userClub?0:1,...knockoutOpts(r.fx)}));finishUserMatch();matches++;}}
+ while(WORLD.season===season){assert(++guard<650,'calendar stalled');const r=advance();assert.notEqual(r.t,'over');if(r.t==='match'){autoPickLineup(UC(),r.fx.comp);CURMATCH=runMatch(createMatch(r.fx.home,r.fx.away,{comp:r.fx.comp,round:r.fx.round,record:false,userSide:r.fx.home===WORLD.userClub?0:1,...knockoutOpts(r.fx)}));CURMATCH.fixture=r.fx;CURMATCH.fixtureKey=fixtureKey(r.fx);finishUserMatch();matches++;}}
  assert.equal(markets.get(season+':30'),1);assert.equal(markets.get(season+':183'),1);assert(WORLD.inbox||WORLD.history.length);
  for(const c of WORLD.clubs)assert(Number.isFinite(c.finance.balance)&&Number.isFinite(c.finance.cap0),'finite finance');
  const finances=JSON.stringify(WORLD.clubs.map(c=>c.finance)),squads=JSON.stringify(WORLD.clubs.map(c=>c.squad));adoptWorld(JSON.parse(JSON.stringify(WORLD)));assert.equal(JSON.stringify(WORLD.clubs.map(c=>c.finance)),finances);assert.equal(JSON.stringify(WORLD.clubs.map(c=>c.squad)),squads);
