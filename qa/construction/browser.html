@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><title>休赛期建设验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};saveGame=async()=>{};autosave=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261024,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   WORLD.day=304;WORLD.fixtures.forEach(f=>{f.played=true;f.hg=1;f.ag=0;});
+   WORLD.cups.forEach(c=>c.winner=WORLD.leagues[lgIndex(c.nation,0)].clubIds[0]);
+   Object.values(WORLD.euro).forEach(e=>{e.winner=WORLD.clubs[0].id;e.stage='done';});
+   ensurePlayoffs().forEach(p=>{p.started=p.done=true;p.winner=leagueTable(lgIndex(p.nation,p.tier+1))[2].id;p.up16=leagueTable(lgIndex(p.nation,p.tier))[15].id;});
+   const c=UC();c.coachRating=10;c.physioRating=10;c.cap=30000;
+   c.projects=[{type:'fac',k:'coachRating',n:'教练团队',to:11,left:100,total:100,cost:123},
+     {type:'fac',k:'physioRating',n:'医疗中心',to:11,left:30,total:100,cost:123},
+     {type:'stad',n:'球场扩建',seats:5000,left:30,total:200,cost:456}];
+   VIEW='build';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const panel=document.createElement('div');panel.id='construction-qa';panel.style='position:fixed;bottom:8px;left:8px;z-index:9999;max-width:420px;background:#112b25;color:#fff;padding:12px;border:1px solid #d9b969;border-radius:8px;font-size:13px';
+   const result=document.createElement('div');result.id='construction-result';result.textContent='独立合成赛季末场景 · 存档写入关闭 · 将跳过61天休赛期';panel.appendChild(result);
+   const button=document.createElement('button');button.textContent='跨入新赛季（验收）';panel.appendChild(button);document.body.appendChild(panel);
+   button.onclick=()=>{try{
+    if(!endSeason())throw Error('赛季未能结束');clearTimeout(SAVE_TIMER);SAVE_ENABLED=false;render();button.disabled=true;
+    if(c.coachRating!==10||c.projects.length!==1||c.projects[0].left!==39||c.physioRating!==11||c.cap!==35000)throw Error('跨季建设结算不符');
+    result.textContent='通过：休赛61天；教练工程100→39天；医疗10→11级；球场30,000→35,000座；存档写入关闭。';result.dataset.passed='true';
+   }catch(e){result.textContent='失败：'+e.message;result.dataset.passed='false';}};
+  }catch(e){document.body.appendChild(document.createElement('pre')).textContent=e.stack;}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

@@ -3133,10 +3133,11 @@ function startStadium(c,seats){
   projectsOf(c).push({type:"stad",seats,n:"球场扩建",left:d,total:d,cost});
   return true;
 }
-function tickProjects(){
+function tickProjects(days=1){
+  if(!(days>0)) return;
   WORLD.clubs.forEach(c=>{
     const ps=projectsOf(c); if(!ps.length) return;
-    ps.forEach(p=>p.left--);
+    ps.forEach(p=>p.left-=days);
     ps.filter(p=>p.left<=0).forEach(p=>{
       if(p.type==="fac"){
         const target=Number.isFinite(p.to)?p.to:c[p.k]+1;
@@ -4931,6 +4932,7 @@ function endSeason(){
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
   WORLD.day=0; WORLD.fired=false; WORLD.offers=[];
+  tickProjects(restDays);                    // 补算跳过的休赛期；须在新赛季 AI 开工前结算
   Object.values(WORLD.players).forEach(p=>{ if(p.clubId!==WORLD.userClub) p.listed=false; p.unrest=0; p.wantsLoan=false; });
   WORLD.clubs.forEach(c=>{ if(c.id!==WORLD.userClub) aiInvest(c); });
   WORLD.clubs.forEach(c=>{
