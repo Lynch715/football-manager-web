@@ -1223,7 +1223,7 @@ function profTxt(p){ const v=profOf(p);
 // 新人不足半年不做年度评估；旧档缺少出道日期时从升级日开始观察，不臆造全年经历。
 function developmentDays(p){
   const start=Math.max(p.createdAbs??-Infinity,p.developmentReviewAbs??-Infinity);
-  return Number.isFinite(start)?clamp(absDay()-start,0,WORLD.day):WORLD.day;
+  return Number.isFinite(start)?clamp(elapsedCalendarDays(start),0,WORLD.day):WORLD.day;
 }
 // 季末（年龄 +1 之后）调用。28 岁起温和收拢未兑现空间，保留成年阶段的培养机会。
 const GAP_LOSS={28:0.12,29:0.22,30:0.35};
@@ -3173,21 +3173,45 @@ function aiInvest(c){
 // 伤病内部按基准康复工作量记录，界面显示当前医疗条件下的预计日数。
 function recoveryRate(p){ const phys=p.clubId>=0?(C(p.clubId).physioRating||10):10; return clamp(1+(phys-10)*0.025,0.8,1.25); }
 function injuryDays(p){ return Math.ceil(Math.max(0,p.injury-(p.injRecovery||0))/recoveryRate(p)); }
-function recoverInjury(p,days,notify){
+function recoverInjury(p,days,notify,rate=recoveryRate(p)){
   if(!(p.injury>0) || !(days>0)) return;
-  const work=(p.injRecovery||0)+recoveryRate(p)*days,recovered=Math.floor(work);
+  const work=(p.injRecovery||0)+rate*days,recovered=Math.floor(work);
   p.injRecovery=work-recovered;p.injury=Math.max(0,p.injury-recovered);
   if(p.injury===0){p.injRecovery=0;p.condition=Math.min(p.condition,55);p.sharp=Math.max(20,p.sharp-25);
     if(notify && ownerOf(p)===WORLD.userClub) news(`${p.cn} 伤愈`,`${p.cn} 已恢复健康，可以重新参加${p.loan?"租借球队的":""}训练。`,"good");}
 }
 function offseasonDays(){ return Math.max(0,Math.round((Date.UTC(WORLD.season+1,7,1)-Date.UTC(WORLD.season,7,1+WORLD.day))/86400000)); }
+// 只预测已有工程的生效区间，不提前修改设施；与每日先施工、后使用设施的顺序一致。
+function offseasonFacilitySegments(c,key,days){
+  if(!(days>0)) return [];
+  const out=[];let rating=c?(c[key]||10):10,day=1;
+  const projects=(c?.projects||[]).filter(p=>p.type==="fac"&&p.k===key&&p.left<=days).slice().sort((a,b)=>a.left-b.left);
+  projects.forEach(p=>{
+    const due=Math.max(1,Math.ceil(p.left));
+    if(due>day) out.push({days:due-day,rating});
+    const target=Number.isFinite(p.to)?p.to:rating+1;
+    rating=clamp(Math.max(rating,target),3,20);day=due;
+  });
+  out.push({days:days-day+1,rating});return out;
+}
 function offseasonRecovery(p,days){
-  const injured=p.injury>0,healingDays=injured?injuryDays(p):0;
-  recoverInjury(p,days,false);
+  if(!(days>0)) return;
+  const injured=p.injury>0;let healingDays=0;
+  for(const s of offseasonFacilitySegments(p.clubId>=0?C(p.clubId):null,"physioRating",days)){
+    if(!(p.injury>0)) break;
+    const rate=clamp(1+(s.rating-10)*0.025,0.8,1.25);
+    healingDays+=Math.min(s.days,Math.ceil(Math.max(0,p.injury-(p.injRecovery||0))/rate));
+    recoverInjury(p,s.days,false,rate);
+  }
   const condition=ri(70,92),sharp=ri(45,70);
   if(p.injury>0){p.condition=Math.min(p.condition,55);p.sharp=Math.min(p.sharp,45);}
   else if(injured){const healthy=Math.max(0,days-healingDays);p.condition=Math.min(condition,55+healthy*5);p.sharp=Math.min(sharp,p.sharp+healthy*2);}
   else {p.condition=condition;p.sharp=sharp;}
+}
+function tickScouting(days=1,rating=UC().scoutRating){
+  if(!(days>0)) return;
+  WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>P(sl.id));
+  WORLD.shortlist.forEach(sl=>{ sl.know=clamp((sl.know||0)+days*(rating*0.55+2),0,100); });
 }
 // ---------- 每日 ----------
 function dailyTick(){
@@ -3216,10 +3240,7 @@ function dailyTick(){
       }});
   });
   // 球探进度（先清掉已退役/被删除球员的条目，否则 P(sl.id) 为 undefined 会让推进崩溃）
-  WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>P(sl.id));
-  WORLD.shortlist.forEach(sl=>{
-    const c=UC(); sl.know=clamp((sl.know||0)+c.scoutRating*0.55+2,0,100);
-  });
+  tickScouting();
   processLoanExpiry(false);
 }
 // ---------- 每周（周一） ----------
@@ -3920,6 +3941,12 @@ function nextWindowIn(){
 }
 function isDeadline(){ return inTransferWindow() && windowEndDay()-WORLD.day<=2; }
 function absDay(){ return WORLD.season*400+WORLD.day; }
+// 存档仍保留 season*400+day 编码；只有实际经过天数使用 UTC 日历，避免跨年多算34/35天。
+function elapsedCalendarDays(start,end=absDay()){
+  if(!Number.isFinite(start)) return Infinity;
+  const utc=n=>{const season=Math.floor(n/400);return Date.UTC(season,7,1+n-season*400);};
+  return Math.max(0,Math.round((utc(end)-utc(start))/86400000));
+}
 
 // 表现指数 0~1：综合本季（样本不足时参考上季）评分、进球助攻、全场最佳
 function perfCore(p, withSample){
@@ -3983,7 +4010,7 @@ function addInterest(p, force){
   if(cur.length>=4) return false;
   const heat=heatOf(p);
   if(!force && heat<0.2) return false;
-  if(absDay()-(p.joinedAbs!=null?p.joinedAbs:-999)<120) return false;   // 新援短期内不会被挖角
+  if(elapsedCalendarDays(p.joinedAbs)<120) return false;   // 新援短期内不会被挖角
   if(!force && rnd() > heat*0.45) return false;
   const ask=sellPrice(p);
   const pool=WORLD.clubs.filter(c=>c.id!==u.id && !cur.some(e=>e.club===c.id)
@@ -4001,9 +4028,13 @@ function addInterest(p, force){
       `有消息称 ${b.cn} 的球探多次现场考察 ${p.cn}${perfIndex(p)>=0.5?"，他近来的出色表现引起了广泛关注":""}。${inTransferWindow()?"预计很快会有正式报价。":`他们可能在约 ${nextWindowIn()} 天后开启的转会窗口出手。`}`,"info");
   return true;
 }
+function pruneInterest(){
+  const u=UC();
+  WORLD.interest=interestList().filter(it=>{ const p=P(it.pid); return p && p.clubId===u.id && WORLD.clubs[it.club] && elapsedCalendarDays(it.since)<170; });
+}
 function updateInterest(){
   const u=UC();
-  WORLD.interest=interestList().filter(it=>{ const p=P(it.pid); return p && p.clubId===u.id && WORLD.clubs[it.club] && absDay()-it.since<170; });
+  pruneInterest();
   u.squad.map(i=>P(i)).forEach(p=>{
     addInterest(p,false);
     if((p.unrest||0)>=2 && p.morale>30) p.morale-=2;   // 要求转会的球员士气持续走低
@@ -4013,6 +4044,7 @@ function updateInterest(){
 // ---------- AI 向玩家报价（转会窗内每日） ----------
 function aiOffersToUser(){
   const u=UC(); WORLD.offers=WORLD.offers||[];
+  pruneInterest();
   const dl=isDeadline();
   interestList().forEach(it=>{
     const p=P(it.pid), b=WORLD.clubs[it.club]; if(!p||!b||p.clubId!==u.id||p.loan) return;
@@ -4068,7 +4100,7 @@ function aiTransferRound(tries){
     const chase = !chasePot && r0<0.46;          // 24% 追逐表现突出的球员，其余补短板
     const pool=Object.values(WORLD.players).filter(p=>
         p.clubId!==buyer.id && p.clubId!==u.id && !p.loan && !relegationGrace(p) && p.injury<=25 && p.age<34 &&
-        absDay()-(p.joinedAbs!=null?p.joinedAbs:-999)>150 &&
+        elapsedCalendarDays(p.joinedAbs)>150 &&
         (chasePot ? (p.age<=21 && p.pa>=150 && p.pa-p.ca>=25)
          : chase ? (perfIndex(p)>=0.45 && p.ca>buyer.rep*1.6)
                : ((p.pos===need.pos||(p.pos2||[]).includes(need.pos)) && p.ca>need.cur+5)) &&
@@ -4239,7 +4271,7 @@ function closeTransferWindow(){
     u.squad.map(i=>P(i)).filter(p=>p.listed && !p.loan).forEach(p=>{
       if((WORLD.offers||[]).some(o=>o.pid===p.id)) return;
       const ask=askingPrice(p), want=sellPrice(p);
-      const n=p.listedAbs!=null? Math.max(1, absDay()-p.listedAbs) : windowEndDay()-1;
+      const n=p.listedAbs!=null? Math.max(1, elapsedCalendarDays(p.listedAbs)) : windowEndDay()-1;
       news(`${p.cn} 没有收到报价`,
         `${p.cn} 挂牌 ${n} 天没有收到任何报价。市价 ${money(ask)}，你的要价 ${money(want)}。`
         + (want>ask? "要价高于市价可能是原因。" : "这个位置近期没有球队缺人。"),"warn");
@@ -4932,7 +4964,9 @@ function endSeason(){
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
   WORLD.day=0; WORLD.fired=false; WORLD.offers=[];
+  for(const s of offseasonFacilitySegments(UC(),"scoutRating",restDays)) tickScouting(s.days,s.rating);
   tickProjects(restDays);                    // 补算跳过的休赛期；须在新赛季 AI 开工前结算
+  pruneInterest();
   Object.values(WORLD.players).forEach(p=>{ if(p.clubId!==WORLD.userClub) p.listed=false; p.unrest=0; p.wantsLoan=false; });
   WORLD.clubs.forEach(c=>{ if(c.id!==WORLD.userClub) aiInvest(c); });
   WORLD.clubs.forEach(c=>{

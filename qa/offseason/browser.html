@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>休赛期五项结算验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};saveGame=async()=>{};autosave=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261024,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   WORLD.day=308;WORLD.fixtures.forEach(f=>{f.played=true;f.hg=1;f.ag=0;});
+   WORLD.cups.forEach(c=>c.winner=WORLD.leagues[lgIndex(c.nation,0)].clubIds[0]);
+   Object.values(WORLD.euro).forEach(e=>{e.winner=WORLD.clubs[0].id;e.stage='done';});
+   ensurePlayoffs().forEach(p=>{p.started=p.done=true;p.winner=leagueTable(lgIndex(p.nation,p.tier+1))[2].id;p.up16=leagueTable(lgIndex(p.nation,p.tier))[15].id;});
+   const c=UC(),p=P(c.lineup[1]),target=Object.values(WORLD.players).filter(p=>p.clubId>=0&&p.clubId!==c.id).sort((a,b)=>b.ca-a.ca)[0];
+   p.age=target.age=22;p.contract=target.contract=WORLD.season+5;p.injury=48;p.injRecovery=0;p.joinedAbs=WORLD.season*400+280;
+   c.physioRating=c.scoutRating=3;c.coachRating=10;c.cap=30000;
+   c.projects=[{type:'fac',k:'physioRating',n:'医疗中心',to:4,left:1,total:60,cost:1},{type:'fac',k:'scoutRating',n:'球探网络',to:4,left:10,total:60,cost:1},
+    {type:'fac',k:'coachRating',n:'教练团队',to:11,left:100,total:100,cost:1},{type:'stad',n:'球场扩建',seats:5000,left:30,total:200,cost:1}];
+   WORLD.shortlist=[{id:target.id,know:10}];const bidders=WORLD.clubs.filter(q=>q.id!==c.id).slice(0,2);
+   WORLD.interest=[{pid:p.id,club:bidders[0].id,heat:1,since:WORLD.season*400+190},{pid:p.id,club:bidders[1].id,heat:1,since:WORLD.season*400+200}];
+   VIEW='build';enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const panel=document.createElement('div');panel.id='offseason-qa';panel.style='position:fixed;bottom:8px;left:8px;z-index:9999;max-width:480px;background:#112b25;color:#fff;padding:12px;border:1px solid #d9b969;border-radius:8px;font-size:13px';
+   const result=document.createElement('div');result.id='offseason-result';result.textContent='独立合成测试世界 · 57天休赛 · 球探了解度10 · 伤病48天 · 存档写入关闭';panel.appendChild(result);
+   const button=document.createElement('button');button.textContent='执行五项跨季验收';panel.appendChild(button);document.body.appendChild(panel);
+   button.onclick=()=>{try{
+    if(!endSeason())throw Error('跨季失败');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+    if(p.injury!==0||c.physioRating!==4||c.scoutRating!==4||WORLD.shortlist[0].know!==100)throw Error('康复或考察未正确结算');
+    if(c.projects.length!==1||c.projects[0].left!==43||c.cap!==35000)throw Error('建设工期不符');
+    if(elapsedCalendarDays(p.joinedAbs)!==85||addInterest(p,true)!==false)throw Error('真实天数或新援保护期不符');
+    if(WORLD.interest.length!==1||WORLD.interest[0].club!==bidders[1].id)throw Error('关注期限清理不符');
+    const condition=p.condition,sharp=p.sharp;offseasonRecovery(p,0);if(p.condition!==condition||p.sharp!==sharp)throw Error('零天休赛改变状态');
+    render();button.disabled=true;result.dataset.passed='true';
+    result.textContent='五项通过：球探10→100；医疗竣工后伤愈；实际85天保护期有效；过期关注清理、有效关注保留；零天状态不变。工程100→43天。存档写入关闭。';
+   }catch(e){result.dataset.passed='false';result.textContent='失败：'+e.message;}};
+  }catch(e){document.body.appendChild(document.createElement('pre')).textContent=e.stack;}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>
