@@ -1,0 +1,55 @@
+{
+  "passed": true,
+  "checks": 12,
+  "source": "/Users/ruis/Claude/Projects/足球经理/publish/index.html",
+  "results": [
+    {
+      "name": "赛季内每日建设仍只推进一天且不重复扣款",
+      "passed": true
+    },
+    {
+      "name": "批量建设推进与逐日推进结果一致，竣工仅结算一次",
+      "passed": true
+    },
+    {
+      "name": "零天休赛不改变建设进度或提前触发竣工",
+      "passed": true
+    },
+    {
+      "name": "2026年第304天跨季按实际休赛61天推进全部俱乐部工程",
+      "passed": true
+    },
+    {
+      "name": "2027年第304天跨季按实际休赛62天推进全部俱乐部工程",
+      "passed": true
+    },
+    {
+      "name": "2026年第307天跨季按实际休赛58天推进全部俱乐部工程",
+      "passed": true
+    },
+    {
+      "name": "2026年第365天跨季按实际休赛0天推进全部俱乐部工程",
+      "passed": true
+    },
+    {
+      "name": "2026年第380天跨季按实际休赛0天推进全部俱乐部工程",
+      "passed": true
+    },
+    {
+      "name": "休赛竣工立即升级四类设施、球场容量和声望，长工程保留剩余工期",
+      "passed": true
+    },
+    {
+      "name": "新赛季AI新开工程不被追扣上个休赛期工期",
+      "passed": true
+    },
+    {
+      "name": "未完成赛程拒绝结季时不扣建设天数",
+      "passed": true
+    },
+    {
+      "name": "旧工程缺少目标等级仍可竣工，读档不补扣工期且重复读档幂等",
+      "passed": true
+    }
+  ]
+}

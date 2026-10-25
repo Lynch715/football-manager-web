@@ -1,7 +1,7 @@
 {
   "passed": true,
   "checks": 15,
-  "source": "/Users/ruis/Claude/Projects/足球经理/_patch/growth-20261023/release/repo/index.html",
+  "source": "/Users/ruis/Claude/Projects/足球经理/publish/index.html",
   "results": [
     {
       "name": "3月青训创建日期准确，入队前比赛不计入培养分母",

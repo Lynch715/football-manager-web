@@ -1,0 +1,43 @@
+<!doctype html><meta charset="utf-8"><title>加时赛浏览器验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261024,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const baseline=JSON.stringify(WORLD),paint=render;let f;
+   function proof(){const m=CURMATCH;if(!m)return;const p=document.getElementById('et-proof');if(p)p.textContent=JSON.stringify({scenario:document.getElementById('et-case').value,savingEnabled:SAVE_ENABLED,half:m.half,time:m.t,done:m.done,extraTime:!!m.et,score:m.score,pens:m.pens,subLimit:subLimit(m),clock:matchClock(m),regulationScore:m.regulationScore,events:m.events.filter(e=>e.type==='sys').map(e=>({t:e.t,half:e.half,text:e.text}))});}
+   render=function(){paint();proof();};
+   enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const bar=document.createElement('div');bar.style='background:#102819;color:#fff;padding:10px;position:relative;z-index:10';
+   bar.innerHTML='<b>加时赛验收（测试场景，禁止存档）</b> <select id="et-case"><option value="ENG">足总杯</option><option value="FRA">法国杯半决赛</option><option value="FRA-final">法国杯决赛</option><option value="ITA">意大利杯八强</option><option value="ESP-PO">西班牙升级附加赛</option><option value="CL">欧冠次回合</option></select> <button id="et-reset">重置场景</button> <button id="et-reg">常规时间终场</button> <button id="et-half">加时中场</button> <button id="et-end">加时终场</button> <pre id="et-proof" style="max-height:100px;overflow:auto;white-space:pre-wrap;font-size:11px"></pre>';
+   document.body.insertBefore(bar,document.body.firstChild);
+   function fresh(){
+    cancelAnimationFrame(ANIM.raf);adoptWorld(JSON.parse(baseline));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+    const name=document.getElementById('et-case').value,nation=name.startsWith('FRA')?4:name==='ITA'?2:0;
+    const ids=WORLD.clubs.filter(c=>c.nation===nation).slice(0,2).map(c=>c.id);WORLD.userClub=ids[0];
+    f={day:10,home:ids[0],away:ids[1],comp:'C',nation,round:name==='FRA'?5:name==='ITA'?4:6,played:false,hg:0,ag:0};
+    WORLD.fixtures=[f];WORLD.day=10;
+    if(name==='ESP-PO'){
+     const cs=WORLD.clubs.filter(c=>c.nation===1).slice(0,2);f.home=cs[0].id;f.away=cs[1].id;WORLD.userClub=f.home;
+     Object.assign(f,{comp:'PO',po:0,tie:0,leg:2,round:1});WORLD.playoffs=[{fmt:'ESP',rounds:[{legs:2,tb:'seed',ties:[{a:f.home,b:f.away}]}]}];
+     WORLD.fixtures.push({...f,home:f.away,away:f.home,played:true,leg:1,hg:0,ag:0});
+    }
+    if(name==='CL'){Object.assign(f,{comp:'CL',stage:'K',round:1,leg:2,tie:0});WORLD.fixtures.push({...f,home:f.away,away:f.home,played:true,leg:1,hg:1,ag:0});}
+    CURMATCH=createMatch(f.home,f.away,{comp:f.comp,round:f.round,record:true,userSide:0,...knockoutOpts(f)});CURMATCH.fixture=f;CURMATCH.fixtureKey=fixtureKey(f);CURMATCH.subMode='manual';
+    CURMATCH.t=93.9;CURMATCH.half=2;CURMATCH.addedTime=4;CURMATCH.score=name==='CL'?[1,0]:[0,0];CURMATCH.teams.forEach(t=>t.men.forEach(x=>x.mins=94));
+    ANIM={raf:0,playing:false,speed:8,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false,trail:[],cap:null};VIEW='match';render();
+   }
+   document.getElementById('et-reset').onclick=fresh;
+   function boundary(half,t){if(!CURMATCH||CURMATCH.done||CURMATCH.half!==half)return;toggleplay(false);CURMATCH.t=t;CURMATCH.addedTime=1;finPhase(CURMATCH,0);if(CURMATCH.done)onMatchEnd();refreshMatchUI(true);proof();}
+   document.getElementById('et-reg').onclick=()=>boundary(2,91);
+   document.getElementById('et-half').onclick=()=>boundary(3,106);
+   document.getElementById('et-end').onclick=()=>boundary(4,121);
+   fresh();
+   if(new URLSearchParams(location.search).has('mobile')){boundary(2,91);boundary(3,106);bar.style.display='none';}
+  }catch(e){document.body.insertAdjacentHTML('beforeend','<pre id="et-error"></pre>');document.getElementById('et-error').textContent=e.stack;console.error(e);}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

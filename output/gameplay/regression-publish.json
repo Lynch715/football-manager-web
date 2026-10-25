@@ -1,8 +1,8 @@
 {
   "passed": true,
   "checks": 17,
-  "source": "/Users/ruis/Claude/Projects/足球经理/_patch/growth-20261023/release/repo/index.html",
-  "sha256": "09390ecdb5c51f38b9cca4ecd1dde22d2741bf3867563b5d60f768661400ca4f",
+  "source": "/Users/ruis/Claude/Projects/足球经理/publish/index.html",
+  "sha256": "b73856470e25c2e24d884bbde3ffc8082fb98c3714c6acc04afecfe6a618fc83",
   "results": [
     {
       "name": "同日本队双赛依次处理，日结只运行一次，结果不重复入账",

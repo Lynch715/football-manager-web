@@ -1,0 +1,83 @@
+{
+  "passed": true,
+  "version": 66,
+  "publishSHA256": "b73856470e25c2e24d884bbde3ffc8082fb98c3714c6acc04afecfe6a618fc83",
+  "sourceSHA256": "6c4c6b4bef3a0180250aa631d9e2c8f4b92928f6414075a9412efee144bace16",
+  "suites": {
+    "extraTime": {
+      "passed": true,
+      "checks": 35,
+      "report": "extra-time/regression-publish.json"
+    },
+    "sourceExtraTime": {
+      "passed": true,
+      "checks": 35,
+      "report": "extra-time/regression-source.json"
+    },
+    "rules": {
+      "passed": true,
+      "checks": 20,
+      "report": "rules/regression-publish.json"
+    },
+    "gameplay": {
+      "passed": true,
+      "checks": 17,
+      "report": "gameplay/regression-publish.json"
+    },
+    "growth": {
+      "passed": true,
+      "checks": 15,
+      "report": "growth/regression-publish.json"
+    },
+    "construction": {
+      "passed": true,
+      "checks": 12,
+      "report": "construction/regression-publish.json"
+    },
+    "offseason": {
+      "passed": true,
+      "checks": 21,
+      "report": "offseason/regression-publish.json"
+    },
+    "offers": {
+      "passed": true,
+      "checks": 34,
+      "report": "deadline/offer-expiry.json"
+    }
+  },
+  "legacySeason": {
+    "passed": true,
+    "startedFromOldSave": true,
+    "season": 2026,
+    "nextSeason": 2027,
+    "matches": 4081,
+    "managedMatches": 37,
+    "delayedPlayoffPlayed": true,
+    "finalDay": 307,
+    "dailySettlementOnce": true,
+    "allCompetitionWinnersRecorded": true
+  },
+  "compatibility": {
+    "passed": true,
+    "exactExpectedMigration": true,
+    "idempotent": true,
+    "sourceBytesUnchanged": true,
+    "oldFixtureUsesExtraTime": true,
+    "actualOldSaveMatchFinished": true,
+    "postMatchRoundTrip": true,
+    "sourceBytes": 8032007,
+    "originalSHA256": "0bed5708bf078f0694bfe1a2743466732576737cebd00bed9d4b96a6f140a06b"
+  },
+  "browser": {
+    "passed": true,
+    "engineClock": true,
+    "extraSubDialog": true,
+    "twoLegAggregate": true,
+    "franceItalyDirectPenalties": true,
+    "spanishSeedAfterExtraTime": true,
+    "skipAndPostMatchReport": true,
+    "mobileIframeWidth": 390,
+    "physicalDeviceTested": false,
+    "savingDisabled": true
+  }
+}

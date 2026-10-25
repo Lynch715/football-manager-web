@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "actualEngine": true,
+  "legacySave": true,
+  "lastDay": 308,
+  "restDays": 57,
+  "injuryAfter": 0,
+  "scoutKnowledge": 100,
+  "expiredInterestRemoved": true,
+  "validInterestKept": true,
+  "constructionCompleted": true,
+  "saveIdempotent": true
+}
