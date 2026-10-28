@@ -1,0 +1,32 @@
+<!doctype html><meta charset="utf-8"><title>赛前阵容确认验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261028,'Coventry City');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const baseline=JSON.stringify(WORLD),paint=render;
+   const bar=document.createElement('div');bar.style='background:#102819;color:#fff;padding:10px;position:relative;z-index:10';
+   bar.innerHTML='<b>赛前确认验收 · 测试世界，不写存档</b> <button id="qa-normal">比赛日</button> <button id="qa-warn">伤停疲劳</button> <button id="qa-next">同日第二场</button> <pre id="qa-proof" style="max-height:72px;overflow:auto;white-space:pre-wrap;font-size:11px"></pre>';
+   document.body.insertBefore(bar,document.body.firstChild);
+   function proof(){const box=document.getElementById('modal-box'),bd=document.getElementById('modal-bd');document.getElementById('qa-proof').textContent=JSON.stringify({viewport:[innerWidth,innerHeight],overflow:bd.scrollWidth>bd.clientWidth,footerVisible:box.getBoundingClientRect().bottom<=innerHeight,day:WORLD.day,view:VIEW,savingEnabled:SAVE_ENABLED,pending:!!PREMATCH,match:!!CURMATCH,time:CURMATCH?.t,lineup:UC().lineup,actual:CURMATCH?.teams[CURMATCH.userSide].men.map(x=>x.id),played:WORLD.fixtures.map(f=>f.played)});}
+   render=function(){paint();proof();};
+   const show=showPreMatch;showPreMatch=function(f){show(f);proof();};
+   const close=closeModal;closeModal=function(){close();proof();};
+   function fresh(warn=false){
+    cancelAnimationFrame(ANIM.raf);adoptWorld(JSON.parse(baseline));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);PREMATCH=null;SELSLOT=null;
+    const c=UC(),other=WORLD.clubs.find(x=>x.lg===c.lg&&x.id!==c.id),f={day:10,home:c.id,away:other.id,comp:'L',lg:c.lg,nation:c.nation,round:1,played:false,hg:0,ag:0};
+    WORLD.fixtures=[f];WORLD.day=10;
+    if(warn){P(c.lineup[1]).injury=8;disciplineOf(P(c.lineup[2])).bans.L=1;P(c.lineup[3]).condition=50;}
+    enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);proof();
+   }
+   document.getElementById('qa-normal').onclick=()=>fresh();document.getElementById('qa-warn').onclick=()=>fresh(true);
+   document.getElementById('qa-next').onclick=()=>{fresh();const g={...WORLD.fixtures[0],comp:'C'};WORLD.fixtures[0].played=true;WORLD.fixtures.push(g);render();onContinue();};
+   fresh();
+   if(new URLSearchParams(location.search).has('mobile')){bar.style.display='none';onContinue();}
+  }catch(e){document.body.insertAdjacentHTML('beforeend','<pre id="qa-error"></pre>');document.getElementById('qa-error').textContent=e.stack;console.error(e);}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

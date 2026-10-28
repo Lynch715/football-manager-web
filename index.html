@@ -225,6 +225,14 @@ img.crest{display:inline-block}
 #modal-ft{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 #modal-ft button{white-space:nowrap}
 
+/* 赛前确认：名单独立换行，手机竖屏无需横向滚动。 */
+.prematch-summary{line-height:1.8}
+.prematch-lists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;width:740px;max-width:100%}
+.prematch-lists section{min-width:0}
+.prematch-player{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+.prematch-name{flex:1;min-width:80px;overflow-wrap:anywhere}
+@media(max-width:600px){.prematch-lists{grid-template-columns:minmax(0,1fr);width:100%;gap:16px}}
+
 /* ---------- 提示条 ---------- */
 #toast{position:fixed;bottom:calc(20px + var(--sab));left:50%;transform:translateX(-50%);z-index:200;
   display:flex;flex-direction:column;gap:7px;align-items:center;pointer-events:none}
@@ -5261,6 +5269,7 @@ function openModal(title, html, footer){
   $("#modal").classList.add("on");
 }
 function closeModal(){ $("#modal").classList.remove("on");
+  if(typeof PREMATCH!=="undefined") PREMATCH=null;
   // 换人面板若从右上角 × 关闭，也要恢复比赛
   if(typeof SUBRESUME!=="undefined" && SUBRESUME && CURMATCH && VIEW==="match" && !CURMATCH.done){ SUBRESUME=false; SUBQ=[]; SUBOUT=null; toggleplay(true); }
 }
@@ -5947,6 +5956,11 @@ let SELSLOT=null;
 function vTactics(v){
   const c=UC(), t=c.tactic;
   v.appendChild(el("div","",`<h1>战术</h1><div class="sub">点击场上位置，再点击右侧球员完成调整</div>`));
+  const matchday=userFixtureOn(WORLD.day);
+  if(matchday){
+    const ready=el("div","card",`<b>比赛日 · ${esc(C(matchday.home).cn)} vs ${esc(C(matchday.away).cn)}</b><div class="hint" style="margin:6px 0">调整会自动保存，准备好后返回赛前确认。</div>`);
+    const back=el("button","pri","返回赛前确认"); back.onclick=()=>showPreMatch(matchday); ready.appendChild(back); v.appendChild(ready);
+  }
   v.appendChild(presetBar());
   const wrap=el("div","row");
 
@@ -7281,7 +7295,58 @@ let ANIM={raf:0, playing:false, speed:1, acc:0, last:0, prev:null, cur:null, evS
 const SPEEDS=[["0.5×",0.5],["1×",1],["2×",2],["4×",4],["8×",8]];
 const PHASE_MS=230;
 
+// 赛前确认只保留当前页面状态，旧存档无需新增字段。
+let PREMATCH=null;
+function validPreMatchFixture(fx){
+  return fx && WORLD.fixtures.includes(fx) && !fx.played && fx.day<=WORLD.day
+    && (fx.home===WORLD.userClub||fx.away===WORLD.userClub);
+}
+function showPreMatch(fx){
+  if(!validPreMatchFixture(fx)||CURMATCH) return;
+  const c=UC(), before=(c.lineup||[]).slice();
+  projectClubSuspensions(c,fx.comp);
+  repairLineup(c,true,fx.comp);
+  PREMATCH={fx,key:fixtureKey(fx),season:WORLD.season,club:c.id};
+  const slots=FORMATIONS[c.tactic.formation], changed=[];
+  before.forEach((id,i)=>{
+    if(id==null||id===c.lineup[i]) return;
+    const p=P(id), incoming=P(c.lineup[i]);
+    const reason=!p||!c.squad.includes(id)||p.clubId!==c.id?"已离队":p.injury>0?"受伤":suspensionFor(p,fx.comp)>0?"本场停赛":"名单重复";
+    changed.push(`${p?esc(p.cn):"原球员"}（${reason}）→ ${incoming?esc(incoming.cn):"空缺"}`);
+  });
+  const row=(id,pos)=>{
+    const p=id!=null?P(id):null;
+    if(!p) return `<div class="prematch-player"><span class="tag">${esc(POS_CN[pos]||pos)}</span><b style="color:var(--warn)">位置空缺</b></div>`;
+    return `<div class="prematch-player"><span class="tag t-${POS_GRP[pos||p.pos]}">${POS_CN[pos||p.pos]}</span><span class="prematch-name">${esc(p.cn)}</span><b>${ovr(p)}</b><span class="hint">体能 ${Math.round(p.condition)}%</span>${p.condition<75?'<span class="tag t-w">疲劳</span>':""}</div>`;
+  };
+  const tired=c.lineup.filter(id=>id!=null&&P(id)&&P(id).condition<75).length;
+  const missing=c.lineup.filter(id=>id!=null).length<slots.length;
+  openModal("赛前阵容确认",
+    `<div class="prematch-summary"><b>${esc(C(fx.home).cn)} vs ${esc(C(fx.away).cn)}</b><div class="hint">${esc(compLabel(fx))} · ${fmtDate(dateOf(fx.day))} · ${knockoutOpts(fx).neutral?"中立场地":fx.home===c.id?"主场":"客场"}</div></div>
+     <div class="hint" style="margin:10px 0">比赛尚未开始。请检查首发和替补，调整完毕后再确认开赛。</div>
+     ${changed.length?`<div class="card" style="color:var(--warn)">首发名单自动调整：<div class="hint">${changed.join("<br>")}</div></div>`:""}
+     ${tired||missing?`<div style="color:var(--warn);margin-bottom:10px">${tired?`首发中有 ${tired} 人体能低于 75%。`:""}${missing?"首发仍有空缺，请检查可用人员。":""}</div>`:""}
+     <div class="prematch-lists"><section><h3>首发 · ${esc(c.tactic.formation)}</h3>${slots.map((s,i)=>row(c.lineup[i],s[0])).join("")}</section>
+     <section><h3>替补 · ${c.subs.length}/${BENCH_MAX}</h3>${c.subs.length?c.subs.map(id=>row(id)).join(""):'<div class="hint">尚未设置替补</div>'}<div class="hint" style="margin-top:12px">助教换人：${SUB_MODE_N[autoSubPref()]}</div></section></div>`,
+    `<button onclick="closeModal()">暂不开赛</button><button onclick="closeModal();go('tactics')">调整阵容 / 战术</button><button class="pri" onclick="confirmPreMatch()">确认阵容，开始比赛</button>`);
+  markDirty();
+}
+function confirmPreMatch(){
+  const pending=PREMATCH;
+  if(!pending) return;
+  if(CURMATCH || pending.season!==WORLD.season || pending.club!==WORLD.userClub
+    || !validPreMatchFixture(pending.fx) || pending.key!==fixtureKey(pending.fx)){
+    closeModal(); toast("赛程已变化，请重新确认阵容","warn"); return;
+  }
+  closeModal();
+  kickoffUserMatch(pending.fx);
+}
+
 function startUserMatch(fx){
+  if(CURMATCH){ VIEW="match"; render(); return; }
+  showPreMatch(fx);
+}
+function kickoffUserMatch(fx){
   // 防御：同一场比赛已有未结算的实例，不重开（重开会重掷随机结果）
   if(CURMATCH){ VIEW="match"; render(); return; }
   if(!WORLD.fixtures.includes(fx)||fx.played||fx.day>WORLD.day||!(fx.home===WORLD.userClub||fx.away===WORLD.userClub)) return;
