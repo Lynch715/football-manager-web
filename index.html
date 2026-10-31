@@ -3432,12 +3432,16 @@ function bumpAttr(p,focusList,dir,club){
     for(const k in w) for(let i=0;i<w[k];i++) pool.push(k);
     if(focusList) focusList.forEach(k=>{ for(let i=0;i<7;i++) pool.push(k); });
     if(p.pos==="GK") for(const k in ATTRS_GK) for(let i=0;i<3;i++) pool.push(k);
-    const allowed=new Set([...new Set(pool)].filter(k=>{
+    const canGrow=k=>{
       if(p.a[k]>=20) return false;
       p.a[k]++; const nc=calcCA(p.a,p.pos); p.a[k]--;
       return nc<=p.pa && nc<=devCap(p);
-    }));
+    };
+    const allowed=new Set([...new Set(pool)].filter(canGrow));
     pool=pool.filter(k=>allowed.has(k));
+    // 核心与专项属性练满后，继续训练计入 CA 其余 15% 的属性。
+    // 沿用已有属性和训练进度，旧档卡住的球员下次训练即可继续兑现潜力。
+    if(!pool.length) pool=ATTR_KEYS.filter(k=>!(k in w) && !(k in ATTRS_GK) && canGrow(k));
   } else {
     // 衰退优先身体属性
     ["pace","accel","agility","stamina","jumping","strength"].forEach(k=>{ for(let i=0;i<4;i++) pool.push(k); });
