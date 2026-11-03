@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><title>比赛结算兼容性验收</title>
+<script>
+(async()=>{
+ const html=await(await fetch('../../index.html',{cache:'no-store'})).text();
+ const setup=()=>document.addEventListener('DOMContentLoaded',()=>{
+  registerSW=()=>{};offlineHint=()=>{};
+  startMenu=async function(){try{
+   await ensureRealData();newWorld(20261103,'Sheffield Wednesday');SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);
+   const baseline=JSON.stringify(WORLD),paint=render;let pre=null,current=null,score=null,financeBefore=null;
+   const bar=document.createElement('div');bar.style='background:#102819;color:#fff;padding:10px;position:relative;z-index:1';
+   bar.innerHTML='<b>比赛结算验收 · 独立测试世界 · 不写存档</b> <button id="qa-legacy">缺轮次旧赛程</button> <button id="qa-copy">赛程对象重建</button> <button id="qa-repeat">再次结算</button><pre id="qa-proof" style="max-height:150px;overflow:auto;white-space:pre-wrap;font-size:12px"></pre>';
+   document.getElementById('view').prepend(bar);
+   function proof(){
+    if(bar.parentNode!==document.getElementById('view'))document.getElementById('view').prepend(bar);
+    const f=WORLD.fixtures.find(x=>x.day===92&&!x.played)||WORLD.fixtures.find(x=>x.day===92);
+    const p=pre&&P(pre.id);const checks={day:WORLD.day,season:WORLD.season,view:VIEW,savingEnabled:SAVE_ENABLED,matchInMemory:!!CURMATCH,played:!!f?.played,fixtureRound:f?.round??'缺少',score:f?.played?[f.hg,f.ag]:null,expectedScore:score,apps:p?.apps,expectedApps:pre?pre.apps+1:null,historyPreserved:JSON.stringify(WORLD.fixtures[0])===JSON.stringify(current?.history),horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
+    const pass=f?.played&&WORLD.day===93&&!CURMATCH&&!SAVE_ENABLED&&p?.apps===pre.apps+1&&JSON.stringify([f.hg,f.ag])===JSON.stringify(score)&&checks.historyPreserved;
+    document.getElementById('qa-proof').textContent=(pass?'PASS：原赛果结算一次，日期推进一天，旧历史保留\n':'待验收：点击「完成比赛」或顶部「继续」\n')+JSON.stringify(checks,null,2);
+   }
+   render=function(){paint();proof();};
+   const show=showPostMatch;showPostMatch=function(m,ended){show(m,ended);proof();};
+   function fresh(copy=false){
+    cancelAnimationFrame(ANIM.raf);adoptWorld(JSON.parse(baseline));SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);PREMATCH=null;SELSLOT=null;closeModal();
+    WORLD.season=2031;WORLD.day=92;
+    const c=UC(),o=WORLD.clubs.find(x=>x.id!==c.id&&x.lg===c.lg),f={day:92,home:o.id,away:c.id,comp:'CL',stage:'G',grp:0,played:false,hg:0,ag:0};
+    const historical={...f,day:80,played:true,hg:2,ag:1};WORLD.fixtures=[historical,f];
+    current={history:{...historical}};const id=c.lineup[0];pre={id,apps:P(id).apps};
+    enterGame();SAVE_ENABLED=false;clearTimeout(SAVE_TIMER);kickoffUserMatch(f);skipMatch();score=CURMATCH.score.slice();
+    if(copy)WORLD.fixtures=JSON.parse(JSON.stringify(WORLD.fixtures));
+    proof();
+   }
+   document.getElementById('qa-legacy').onclick=()=>fresh(false);
+   document.getElementById('qa-copy').onclick=()=>fresh(true);
+   document.getElementById('qa-repeat').onclick=()=>{completeMatch();proof();};
+   fresh();
+  }catch(e){document.body.insertAdjacentHTML('beforeend','<pre id="qa-error"></pre>');document.getElementById('qa-error').textContent=e.stack;console.error(e);}};
+ });
+ document.open();document.write(html.replace('</head>','<base href="../../"><script>('+setup.toString()+')();<\/script></head>'));document.close();
+})();
+</script>

@@ -5229,11 +5229,22 @@ function seasonReady(){
     && ensurePlayoffs().every(p=>p.done&&p.winner!=null);
 }
 function fixtureForMatch(M){
-  if(!M) return null;
-  if(M.fixture) return WORLD.fixtures.includes(M.fixture)&&!M.fixture.played&&M.fixture.home===M.h&&M.fixture.away===M.a&&M.fixture.comp===M.comp&&M.fixture.round===M.round&&fixtureKey(M.fixture)===M.fixtureKey?M.fixture:null;
-  const fx=WORLD.fixtures.filter(f=>!f.played&&f.day<=WORLD.day&&f.home===M.h&&f.away===M.a);
-  const exact=fx.filter(f=>f.comp===M.comp&&(!M.round||f.round===M.round));
-  return exact.length===1?exact[0]:!M.round&&fx.length===1?fx[0]:null;
+  if(!M || (M.fixtureSeason!=null && M.fixtureSeason!==WORLD.season)) return null;
+  const eligible=f=>!f.played && f.day<=WORLD.day && f.home===M.h && f.away===M.a && f.comp===M.comp
+    && (f.home===WORLD.userClub || f.away===WORLD.userClub);
+  // 旧赛程可能没有 round；createMatch 会将其记为 0，结算时按相同含义比较。
+  const sameRound=f=>(f.round==null?0:f.round)===(M.round==null?0:M.round);
+  if(M.fixture || M.fixtureKey!=null){
+    const key=M.fixtureKey!=null?M.fixtureKey:fixtureKey(M.fixture);
+    const matches=f=>eligible(f) && sameRound(f) && fixtureKey(f)===key;
+    if(M.fixture && WORLD.fixtures.includes(M.fixture) && matches(M.fixture)) return M.fixture;
+    // 对象引用丢失或赛程重建时，只接受日期、赛事、阶段、回合等信息完全一致的唯一记录。
+    const exact=WORLD.fixtures.filter(matches);
+    return exact.length===1?exact[0]:null;
+  }
+  // 兼容无绑定信息的旧比赛；不能跨赛事匹配，不能猜测多个候选中的任意一场。
+  const exact=WORLD.fixtures.filter(f=>eligible(f) && (!M.round || sameRound(f)));
+  return exact.length===1?exact[0]:null;
 }
 function fixtureKey(f){ return JSON.stringify([f.day,f.home,f.away,f.comp,f.lg,f.nation,f.po,f.stage,f.grp,f.round,f.leg,f.tie]); }
 
@@ -7358,6 +7369,7 @@ function kickoffUserMatch(fx){
   CURMATCH=createMatch(fx.home,fx.away,{comp:fx.comp,round:fx.round, record:true, userSide:side, ...knockoutOpts(fx)});
   CURMATCH.fixture=fx;
   CURMATCH.fixtureKey=fixtureKey(fx);
+  CURMATCH.fixtureSeason=WORLD.season;
   CURMATCH.subMode=autoSubPref();
   ANIM={raf:0,playing:false,speed:(WORLD.settings&&WORLD.settings.matchSpeed)||1,acc:0,last:0,prev:null,cur:CURMATCH.frames[0]||null,evShown:0,ended:false,trail:[],cap:null};
   VIEW="match"; render();
@@ -7471,7 +7483,14 @@ function onMatchEnd(){
 }
 function completeMatch(){
   const M=CURMATCH;
-  const res=finishUserMatch();
+  if(!M) return;  // 连点或旧按钮事件不得重复结算、重复推进日期。
+  let res;
+  try{ res=finishUserMatch(); }
+  catch(err){
+    console.error(err);
+    toast("比赛暂未结算："+(err&&err.message||err),"bad");
+    return;       // 赛程校验失败时保留当前比赛，不保存、不清空比赛、不推进日期。
+  }
   VIEW="home";
   autoSave();      // 每场比赛后落盘，「继续游戏」才有意义
   showPostMatch(M, res==="season");
