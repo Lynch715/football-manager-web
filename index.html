@@ -807,7 +807,11 @@ NATIONS.forEach((n,ni)=>n.tiers.forEach((t,ti)=>{ t.n=CLUB_DATA[ni][ti].length; 
 // 联赛全局编号（0..10）：按国家、层级顺序
 const LEAGUE_DEFS=[];
 NATIONS.forEach((n,ni)=>n.tiers.forEach((t,ti)=>{ t.lg=LEAGUE_DEFS.length; LEAGUE_DEFS.push({lg:LEAGUE_DEFS.length,nation:ni,tier:ti,name:t.name,short:t.short,n:t.n,price:t.price,prize:t.prize}); }));
-const lgIndex=(nation,tier)=> (NATIONS[nation]&&NATIONS[nation].tiers[tier])? NATIONS[nation].tiers[tier].lg : -1;
+// 旧档可能保留扩展版联赛编号；当前赛季始终按存档里的国家/级别查找，不套用新版数组下标。
+const lgIndex=(nation,tier)=> WORLD&&WORLD.leagues&&WORLD.leagues.length
+  ? WORLD.leagues.findIndex(l=>l.nation===nation&&l.tier===tier)
+  : (NATIONS[nation]&&NATIONS[nation].tiers[tier])?NATIONS[nation].tiers[tier].lg:-1;
+const isEuroClub=c=>!!c && c.lg<0;  // 欧战外围队没有国内联赛，伪国家编号在旧档中可能不同。
 
 
 /* =========================================================
@@ -1344,8 +1348,8 @@ function calcValue(p){
    系数按「开局各联赛 现有年薪/目标上限 中位数 ≈ 0.95」校准，次序 = LEAGUE_DEFS（英超、英冠、英甲、西甲、西乙、意甲、意乙、德甲、德乙、法甲、法乙）。*/
 const LEAGUE_WAGE_F=[0.92, 0.97, 0.74, 0.84, 0.65, 0.69, 0.61, 0.59, 0.79, 0.53, 0.65];
 const EURO_WAGE_F=0.69;
-function wageF(c){ if(!c) return 1; if(c.nation===EURO_NATION) return EURO_WAGE_F;
-  const lg=lgIndex(c.nation,c.tier); return (lg>=0 && LEAGUE_WAGE_F[lg]!=null)? LEAGUE_WAGE_F[lg] : 1; }   // 建世界时 c.lg 还没设，按 nation/tier 现算
+function wageF(c){ if(!c) return 1; if(isEuroClub(c)) return EURO_WAGE_F;
+  const lg=NATIONS[c.nation]?.tiers[c.tier]?.lg; return (lg>=0 && LEAGUE_WAGE_F[lg]!=null)? LEAGUE_WAGE_F[lg] : 1; }   // 建世界时 c.lg 还没设，按 nation/tier 现算
 function calcWage(p, rep, club){
   let w = (Math.pow(p.ca/10,3.0)*33 + rep*20) * wageF(club);
   if(p.age<21) w*=0.5; else if(p.age<24) w*=0.82; else if(p.age>33) w*=0.85;
@@ -1363,7 +1367,7 @@ function makePlayer(lvl, pos, age, clubId){
   const A=genAttrs(lvl,pos);
   const p={
     id:nextPid(), first, last, name:first+" "+last, cn:toCN(first,last),
-    pos, pos2:[], age, clubId, nat:(club && club.nation===EURO_NATION && rg===club.rg && club.country)? club.country : pick(pool.nat), rg,
+    pos, pos2:[], age, clubId, nat:(club && isEuroClub(club) && rg===club.rg && club.country)? club.country : pick(pool.nat), rg,
     a:A, ca:0, pa:0,
     condition:100, morale:ri(60,88), injury:0, injType:"", sharp:ri(70,95),
     contract:0, wage:0, value:0,
@@ -1625,8 +1629,8 @@ function setBoardExpectation(){
 const P = id => WORLD.players[id];
 // 联赛相关小工具
 const LG  = c => (c && c.lg>=0 && WORLD.leagues[c.lg]) ? WORLD.leagues[c.lg] : null;
-const LGN = c => { const l=LG(c); return l? l.name : (c.nation===EURO_NATION? "欧洲其他球队" : "—"); };
-const LGS = c => { const l=LG(c); return l? l.short : (c.nation===EURO_NATION? (c.country||"欧洲") : "—"); };
+const LGN = c => { const l=LG(c); return l? l.name : (isEuroClub(c)? "欧洲其他球队" : "—"); };
+const LGS = c => { const l=LG(c); return l? l.short : (isEuroClub(c)? (c.country||"欧洲") : "—"); };
 function leagueRowOf(c){ const l=LG(c); if(!l) return null; return leagueTable(l.lg).find(r=>r.id===c.id)||null; }
 // 赛事标签（用于赛程 / 战报）
 function compShort(f){
@@ -1803,12 +1807,27 @@ function ensurePlayoffs(){
   makePlayoffs().forEach(p=>{ if(!WORLD.playoffs.some(x=>x.nation===p.nation&&x.tier===p.tier)) WORLD.playoffs.push(p); });
   return WORLD.playoffs;
 }
+// 旧错误可能已留下空球队的附加赛占位；只撤回完全未开赛、没有任何有效种子/赛果的占位。
+function repairEmptyPlayoffStubs(){
+  (WORLD.playoffs||[]).forEach((po,pi)=>{
+    const fixtures=WORLD.fixtures.filter(f=>f.comp==="PO"&&f.po===pi);
+    if(!fixtures.length || po.done || po.winner!=null || Object.keys(po.seed||{}).length
+      || fixtures.some(f=>f.played || C(f.home) || C(f.away))
+      || (po.rounds||[]).some(r=>(r.ties||[]).some(t=>t.w!=null || C(t.a) || C(t.b)))) return;
+    WORLD.fixtures=WORLD.fixtures.filter(f=>!(f.comp==="PO"&&f.po===pi));
+    Object.assign(po,{seed:{},up16:null,rounds:[],cur:-1,started:false,done:false,winner:null,skip:false});
+    delete po.byPos;
+  });
+}
 // 下级联赛里打附加赛的名次（联赛页上色、玩法说明用）
 function poSeedsRange(fmt){ return fmt==="ITA"?[3,8] : fmt==="GER"?[3,3] : fmt==="FRA"?[3,5] : [3,6]; }
 function poHasUpper(fmt){ return fmt==="GER"||fmt==="FRA"; }
 
 function poLeaguesDone(po){
   const lo=lgIndex(po.nation,po.tier+1), up=lgIndex(po.nation,po.tier);
+  const lower=WORLD.leagues[lo], upper=WORLD.leagues[up];
+  if(!lower || lower.clubIds.length<poSeedsRange(po.fmt)[1]
+    || (poHasUpper(po.fmt)&&(!upper||upper.clubIds.length<3))) return false;
   return !WORLD.fixtures.some(f=>f.comp==="L" && !f.played && (f.lg===lo || (poHasUpper(po.fmt) && f.lg===up)));
 }
 // 本轮规格：赛制、基准日期、对阵（返回 null = 附加赛已经打完）
@@ -1888,11 +1907,12 @@ function poScore(t,id){
 function poInvolvesUser(po){ const u=WORLD.userClub; return po.seed[u]!=null; }
 function poStart(po, pi, today){
   const lo=leagueTable(lgIndex(po.nation,po.tier+1));
+  const up=poHasUpper(po.fmt)?leagueTable(lgIndex(po.nation,po.tier)):null;
+  if(lo.length<poSeedsRange(po.fmt)[1] || (up&&up.length<3)) return false;
   po.byPos={}; lo.forEach(r=>po.byPos[r.rank]=r.id);
   const [s0,s1]=poSeedsRange(po.fmt);
   for(let k=s0;k<=s1;k++) if(po.byPos[k]!=null) po.seed[po.byPos[k]]=k;
   if(poHasUpper(po.fmt)){
-    const up=leagueTable(lgIndex(po.nation,po.tier));
     po.up16=up[up.length-3].id; po.seed[po.up16]=0;
   }
   po.started=true;
@@ -2083,7 +2103,7 @@ function defaultEuroQual(){
   return q;
 }
 function fillEuroWithOthers(q){
-  const others=WORLD.clubs.filter(c=>c.nation===EURO_NATION)
+  const others=WORLD.clubs.filter(c=>isEuroClub(c))
     .map(c=>({id:c.id, s:c.rep+gauss(0,5)})).sort((a,b)=>b.s-a.s).map(x=>x.id);
   const needCL=32-q.CL.length, needEL=32-q.EL.length;
   q.CL.push(...others.slice(0,Math.max(0,needCL)));
@@ -2101,7 +2121,7 @@ function drawGroups(ids){
     for(let tries=0;tries<40;tries++){
       const order=shuffle([...pot]);
       let clash=0;
-      order.forEach((id,gi)=>{ if(groups[gi].some(x=>C(x).nation===C(id).nation && C(id).nation!==EURO_NATION)) clash++; });
+      order.forEach((id,gi)=>{ if(groups[gi].some(x=>C(x).nation===C(id).nation && !isEuroClub(C(id)))) clash++; });
       if(clash<bestClash){ bestClash=clash; best=order; if(clash===0) break; }
     }
     best.forEach((id,gi)=>groups[gi].push(id));
@@ -2177,7 +2197,7 @@ function euroSeedKnockout(E){
     const order=shuffle([...runners]); let clash=0;
     order.forEach((r,i)=>{ const w=winners[i];
       if(E.groups[i].includes(r)) clash+=10;
-      if(C(r).nation===C(w).nation && C(r).nation!==EURO_NATION) clash+=1; });
+      if(C(r).nation===C(w).nation && !isEuroClub(C(r))) clash+=1; });
     if(clash<bestClash){ bestClash=clash; best=order; if(!clash) break; }
   }
   const pairs=best.map((r,i)=>[r, winners[i]]);   // 小组第二先主场
@@ -3320,7 +3340,7 @@ function weeklyTick(){
       const lg=LG(c);
       const tv = lg? lg.prize[1]*0.5/10 : Math.pow(c.rep,3)*EURO_TV_K/10;
       addMoney(c, Math.round(tv), lg? `${lg.short}转播分成（月度）` : "联赛转播分成（月度）");
-      if(!lg && c.nation===EURO_NATION) addMoney(c, Math.round(euroDomesticGate(c)/10), `${c.country||"本国"}联赛门票（月度）`);
+      if(!lg && isEuroClub(c)) addMoney(c, Math.round(euroDomesticGate(c)/10), `${c.country||"本国"}联赛门票（月度）`);
     }
   });
   // 训练成长
@@ -3532,7 +3552,7 @@ function revOf(c, R){
   const lg=LG(c), cap=c.cap||0;
   const att=Math.round(Math.min(cap, cap*(0.55 + c.rep/220 + 0.06)));    // 场均积分按 1.0 保守估
   v=Math.round(Math.pow(c.rep,3)*2*R.mon                                  // 商业赞助
-    + (lg? lg.prize[1]*0.5/10 : (Math.pow(c.rep,3)*EURO_TV_K + (c.nation===EURO_NATION? euroDomesticGate(c) : 0))/10)*R.tv   // 月度转播（外围队含本国联赛门票）
+    + (lg? lg.prize[1]*0.5/10 : (Math.pow(c.rep,3)*EURO_TV_K + (isEuroClub(c)? euroDomesticGate(c) : 0))/10)*R.tv   // 月度转播（外围队含本国联赛门票）
     + (R.home.get(c.id)||0)*att*ticketPrice(c)                            // 联赛主场门票（杯赛/欧战不算）
     + endPrize(c)                                                         // 赛季末名次奖金
     + (R===REV_S? euroExpected(c) : 0));                                  // 已确定的欧战收入（只进整季预测 rev0）
@@ -4848,7 +4868,7 @@ function endSeason(){
     .map(p=>({n:p.cn,c:p.clubId>=0?C(p.clubId).short:"-",r:(p.ratingSum/p.apps).toFixed(2),ap:p.apps}));
   const tables={};
   WORLD.leagues.forEach(lg=>{
-    const t=leagueTable(lg.lg); tables[lg.lg]=t;
+    const t=leagueTable(lg.lg); if(!t.length) return; tables[lg.lg]=t;
     summary.leagues.push({lg:lg.lg, nation:lg.nation, tier:lg.tier, table:t.map(r=>({id:r.id,pts:r.pts,gd:r.gd,rank:r.rank}))});
     const champ=C(t[0].id); champ.trophies.push(WORLD.season+" "+lg.name);
     const n=t.length;
@@ -4861,7 +4881,7 @@ function endSeason(){
     });
   });
   // 只打欧战的其他欧洲球队：按声望折算其本国联赛的奖金与转播收入
-  WORLD.clubs.filter(c=>c.nation===EURO_NATION).forEach(c=>addMoney(c, Math.round(Math.pow(c.rep,3)*EURO_TV_K), `${c.country||"本国"}联赛奖金/转播分成`));
+  WORLD.clubs.filter(c=>isEuroClub(c)).forEach(c=>addMoney(c, Math.round(Math.pow(c.rep,3)*EURO_TV_K), `${c.country||"本国"}联赛奖金/转播分成`));
   // ---- 下赛季欧战资格（按各国顶级联赛排名 + 杯赛冠军）----
   const qual={CL:[],EL:[]};
   NATIONS.forEach((nat,ni)=>{
@@ -4903,16 +4923,16 @@ function endSeason(){
   summary.playoffs=(WORLD.playoffs||[]).map(p=>({nation:p.nation,tier:p.tier,name:p.name,winner:p.winner,up16:p.up16,skip:p.skip}));
   moves.forEach(mv=>{
     const upName=NATIONS[mv.nation].tiers[mv.tier], downName=NATIONS[mv.nation].tiers[mv.tier+1];
-    mv.promoted.forEach(id=>{ const c=C(id); c.tier=mv.tier; c.lg=upName.lg; c.board.conf=clamp(c.board.conf+28,0,100);
+    mv.promoted.forEach(id=>{ const c=C(id); c.tier=mv.tier; c.lg=lgIndex(mv.nation,mv.tier); c.board.conf=clamp(c.board.conf+28,0,100);
       c.trophies.push(WORLD.season+" 升入"+upName.short);
       if(id===WORLD.userClub) news("升级成功！",
         `${c.cn} 成功升入 ${upName.name}！董事会对你的工作非常满意，下赛季的预算也将大幅提升。`,"good"); });
-    mv.relegated.forEach(id=>{ const c=C(id); c.tier=mv.tier+1; c.lg=downName.lg; c.board.conf=clamp(c.board.conf-42,0,100);
+    mv.relegated.forEach(id=>{ const c=C(id); c.tier=mv.tier+1; c.lg=lgIndex(mv.nation,mv.tier+1); c.board.conf=clamp(c.board.conf-42,0,100);
       if(id===WORLD.userClub) news("球队降级",
         `${c.cn} 不幸降入 ${downName.name}。董事会对此深感失望，你的帅位岌岌可危。`,"bad"); });
   });
   // 夺冠加成
-  WORLD.leagues.forEach(lg=>{ const t=tables[lg.lg];
+  WORLD.leagues.forEach(lg=>{ const t=tables[lg.lg]; if(!t||!t.length) return;
     C(t[0].id).board.conf=clamp(C(t[0].id).board.conf+30,0,100); });
   WORLD.history.push(summary);
 
@@ -5248,21 +5268,37 @@ function fixtureForMatch(M){
 }
 function fixtureKey(f){ return JSON.stringify([f.day,f.home,f.away,f.comp,f.lg,f.nation,f.po,f.stage,f.grp,f.round,f.leg,f.tie]); }
 
-// 用户比赛结束后收尾
+// 用户比赛结束后收尾。后续其他比赛、日末处理出错时，整次结算回滚，保留本场原比分。
 function finishUserMatch(){
   const M=CURMATCH;
   const fx=fixtureForMatch(M);
   if(!M || !M.done || !fx || fx.day>WORLD.day || !(fx.home===WORLD.userClub||fx.away===WORLD.userClub)) throw new Error("比赛未完成或对应赛程已失效");
-  if(!applyResult(fx,M)) throw new Error("比赛结果未能结算");
-  CURMATCH=null;
-  simDay(WORLD.day,true);
-  if(userFixtureOn(WORLD.day)) return "pending";
-  processDayEnd(WORLD.day);
-  WORLD.day++;
-  CURMATCH=null;
-  if(seasonReady() && endSeason()){ WORLD.youthDone=false; return "season"; }
-  prepareDeadlineMarket();
-  return "ok";
+  const before=typeof structuredClone==="function"?structuredClone(WORLD):JSON.parse(JSON.stringify(WORLD));
+  const rng=RNGSTATE, pid=PID, fin=FIN_CLK, fixtureIndex=WORLD.fixtures.indexOf(fx);
+  let stage="本场数据入账";
+  try{
+    if(!applyResult(fx,M)) throw new Error("比赛结果未能结算");
+    CURMATCH=null;
+    stage="同日其他比赛及杯赛推进";
+    simDay(WORLD.day,true);
+    if(userFixtureOn(WORLD.day)) return "pending";
+    stage="日末训练、伤病及转会";
+    processDayEnd(WORLD.day);
+    WORLD.day++;
+    stage="赛季收尾";
+    if(seasonReady() && endSeason()){ WORLD.youthDone=false; return "season"; }
+    stage="转会截止日准备";
+    prepareDeadlineMarket();
+    return "ok";
+  }catch(err){
+    WORLD=before; RNGSTATE=rng; PID=pid; FIN_CLK=fin; REV_R={key:""}; REV_S={key:""};
+    CURMATCH=M;
+    M.fixture=WORLD.fixtures[fixtureIndex];
+    M.teams.forEach(T=>{T.club=C(T.cid);T.men.forEach(m=>{m.p=P(m.id);});});
+    const failure=err instanceof Error?err:new Error(String(err));
+    failure.matchStage=stage;
+    throw failure;
+  }
 }
 
 /* =========================================================
@@ -6409,7 +6445,7 @@ function vTransfer(v){
     if(TFILTER.pos) pool=pool.filter(p=>p.pos===TFILTER.pos||p.pos2.includes(TFILTER.pos));
     if(TFILTER.tier==="rel") pool=pool.filter(isRelegationSale);
     else if(TFILTER.tier==="fa") pool=pool.filter(p=>p.clubId<0);
-    else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).nation===EURO_NATION);
+    else if(TFILTER.tier==="eu") pool=pool.filter(p=>p.clubId>=0&&isEuroClub(C(p.clubId)));
     else if(TFILTER.tier!=="") pool=pool.filter(p=>p.clubId>=0&&C(p.clubId).lg==TFILTER.tier);
     if(TFILTER.minCa) pool=pool.filter(p=>ovr(p)>=TFILTER.minCa);
     pool=pool.filter(p=>p.age<=TFILTER.maxAge);
@@ -6938,7 +6974,7 @@ function vClub(v){
 let LGNATION=null, LGTIER=0, EUROTAB="CL";
 function vLeague(v){
   const u=UC();
-  if(LGNATION==null){ LGNATION = u.nation===EURO_NATION? "EU" : u.nation; LGTIER=u.tier||0; }
+  if(LGNATION==null){ LGNATION = isEuroClub(u)? "EU" : u.nation; LGTIER=u.tier||0; }
   v.appendChild(el("div","",`<h1>赛事</h1>`));
   // 国家页签
   const bar=el("div","segbar"); bar.style.cssText="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px";
@@ -7170,7 +7206,7 @@ function seasonSummaryHTML(h, brief){
   // 我的联赛
   const mine=h.leagues.find(l=>l.lg===(u.lastLg!=null?u.lastLg:u.lg)) || h.leagues[0];
   if(mine){
-    const lg=LEAGUE_DEFS[mine.lg];
+    const lg=LEAGUE_DEFS.find(l=>l.nation===mine.nation&&l.tier===mine.tier);
     inner+=`<div style="font-weight:700;margin-bottom:4px">${lg?lg.name:""}</div>`;
     mine.table.slice(0,brief?4:6).forEach(r=>{ inner+=`<div style="font-size:12px;padding:1px 0">${r.rank}. ${crestHTML(C(r.id))}${esc(C(r.id).cn)} <span class="hint">${r.pts}分</span></div>`; });
     const me=mine.table.find(r=>r.id===u.id); if(me && me.rank>(brief?4:6)) inner+=`<div style="font-size:12px;padding:1px 0">${me.rank}. ${crestHTML(u)}${esc(u.cn)} <span class="hint">${me.pts}分</span></div>`;
@@ -7488,7 +7524,7 @@ function completeMatch(){
   try{ res=finishUserMatch(); }
   catch(err){
     console.error(err);
-    toast("比赛暂未结算："+(err&&err.message||err),"bad");
+    toast("比赛暂未结算"+(err.matchStage?"（"+err.matchStage+"）":"")+"："+(err&&err.message||err),"bad");
     return;       // 赛程校验失败时保留当前比赛，不保存、不清空比赛、不推进日期。
   }
   VIEW="home";
@@ -8004,6 +8040,7 @@ function adoptWorld(obj){
 // 旧存档迁移：重算工资预算（旧公式对小球会过紧），并把自由球员的旧合同周薪刷新为市场期望
 function migrateWorld(){
   if(!WORLD) return;
+  repairEmptyPlayoffStubs();
   migratePlayingTime();
   migrateDevelopment();
   Object.values(WORLD.players).forEach(p=>disciplineOf(p));
