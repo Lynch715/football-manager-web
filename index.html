@@ -2366,13 +2366,14 @@ function repairLineup(club,strict,comp){
   const used=new Set();
   club.lineup=club.lineup.map(id=> ok(id)&&!used.has(id)? (used.add(id),id) : null);
   club.subs=(club.subs||[]).filter(id=> ok(id) && !used.has(id) && (used.add(id),true));
-  const pool=club.squad.filter(id=>ok(id)&&!used.has(id));
+  const starters=new Set(club.lineup.filter(id=>id!=null));
+  const pool=club.squad.filter(id=>ok(id)&&!starters.has(id));
   // 补空缺的首发位置
   slots.forEach((sl,i)=>{
     if(club.lineup[i]!=null) return;
     let best=null,bs=-1;
-    pool.forEach(id=>{ if(used.has(id))return; const sc=playerScore(P(id),sl[0]); if(sc>bs){bs=sc;best=id;} });
-    if(best!=null){ used.add(best); club.lineup[i]=best; }
+    pool.forEach(id=>{ if(starters.has(id))return; const sc=playerScore(P(id),sl[0]); if(sc>bs){bs=sc;best=id;} });
+    if(best!=null){ used.add(best); starters.add(best); club.subs=club.subs.filter(id=>id!==best); club.lineup[i]=best; }
   });
   // 替补席补到 7 人，优先保证有一个门将
   const rest=club.squad.filter(id=>ok(id)&&!used.has(id)).sort((a,b)=>P(b).ca-P(a).ca);
@@ -2541,8 +2542,7 @@ const GK_SKILLS=new Set(["reflex","handling","oneonone","aerial","gkkick","comma
 const att=(m,k)=> m.p.a[k]*condF(m.cond)*executionF(m)*(m.emergencyGK&&GK_SKILLS.has(k)?0.35:1);
 function activeKeeper(M,side){
   const T=M.teams[side], on=T.men.filter(m=>!m.off);
-  const gk=on.find(m=>m.p.pos==="GK"&&m.pos==="GK")||on.find(m=>m.p.pos==="GK")
-    ||on.find(m=>m.pos==="GK")||on.reduce((b,m)=>!b||m.p.a.reflex>b.p.a.reflex?m:b,null);
+  const gk=on.find(m=>m.pos==="GK")||on.find(m=>m.p.pos==="GK")||on.reduce((b,m)=>!b||m.p.a.reflex>b.p.a.reflex?m:b,null);
   if(!gk) return null;
   const changed=T.gk!==gk, emergency=gk.p.pos!=="GK", first=!gk.keeperSet;
   if(changed||first){
@@ -3598,6 +3598,7 @@ function committedNext(c){
   let w=0;
   c.squad.forEach(id=>{ const p=P(id); if(p && !p.loan && p.contract>WORLD.season) w+=p.wage*52; });
   (c.loanedOut||[]).forEach(id=>{ const p=P(id); if(p && p.contract>WORLD.season) w+=p.wage*52; });
+  for(const p of pendingArrivals(c)) w+=p.precontract.wage*52;
   return Math.round(w);
 }
 /* 自有球员全部年薪：含本季到期的、含外租的全额，不含租入。棘轮的基数。*/
@@ -3730,10 +3731,12 @@ function isRelegationSale(p){
   return !!(r && r.season===WORLD.season && r.club===p.clubId && windowName()==="夏窗");
 }
 function relegationGrace(p){ return isRelegationSale(p) && WORLD.day<p.relegationSale.aiFromDay; }
-// 普通深度不足可以谈高价，但不能卖到低于 18 人或缺少必要位置覆盖。
+// 玩家自主决定位置深度，保留18人总数底线；AI仍检查覆盖并可要求深度溢价。
 function saleTerms(club,p){
   if(!p || p.loan) return {blocked:"球员正在租借中"};
+  if(p.precontract) return {blocked:"球员已签订下赛季生效的合同"};
   if(club.squad.length<=SQUAD_FLOOR) return {blocked:`出售后阵容不足 ${SQUAD_FLOOR} 人，需先补员`};
+  if(club.id===WORLD.userClub) return {premium:1,fee:askingPrice(p)};
   const rest=club.squad.map(P).filter(q=>q && q.id!==p.id);
   const cover=rest.filter(q=>q.pos===p.pos || (q.pos2||[]).includes(p.pos)).length;
   const slots=FORMATIONS[club.tactic.formation]||[];
@@ -3752,6 +3755,7 @@ function canSell(club,p,fee){
    （0 年 ×0.16、3 年 ×1），这些人身价直接虚高 6 倍多，玩家还得按虚高价掏签字费。
    注意不动 shortlist：被原东家扫地出门的球员，玩家多半更想继续盯着他。*/
 function toFreeAgent(p, from){
+  if(p.precontract) return false;
   const c = from || (p.clubId>=0? C(p.clubId) : null);
   if(c) c.squad=c.squad.filter(i=>i!==p.id);
   p.clubId=-1; p.num=null;
@@ -3783,8 +3787,9 @@ function pushTransferLog(row){
   WORLD.transferLog.unshift(Object.assign({d:WORLD.day, s:WORLD.season}, row));
   if(WORLD.transferLog.length>200) WORLD.transferLog.length=200;
 }
-function transferPlayer(pid, toClubId, fee, wage, years){
+function transferPlayer(pid, toClubId, fee, wage, years, opts){
   const p=P(pid);
+  if(!p || !C(toClubId) || p.clubId===toClubId || (p.precontract && !opts?.arrival)) return false;
   if(p.loan) return false;                     // 租借中的球员不可转会（归属权在母队）
   if(toClubId!==WORLD.userClub && relegationGrace(p)) return false;
   const {from,to}=movePlayer(pid, toClubId, fee);
@@ -3834,7 +3839,7 @@ function loanBreakCost(p, byOwner){
   return Math.max(0, Math.round(p.wage*share*weeks*0.25/1000)*1000);
 }
 function loanPlayer(pid, toClubId, t){
-  const p=P(pid); if(!p || p.loan || p.clubId<0 || p.clubId===toClubId) return false;
+  const p=P(pid); if(!p || p.loan || p.precontract || p.clubId<0 || p.clubId===toClubId) return false;
   if(relegationGrace(p)) return false;
   t=t||{};
   const owner=C(p.clubId), to=C(toClubId);
@@ -3909,7 +3914,7 @@ function posRank(c,p){ return c.squad.map(i=>P(i)).filter(q=>q.pos===p.pos).sort
 function wouldStart(p,c){ const best=c.squad.map(i=>P(i)).filter(q=>q.pos===p.pos&&q.id!==p.id).sort((a,b)=>b.ca-a.ca)[0]; return !best || p.ca>=best.ca-2; }
 // AI 母队愿不愿意把这名球员租出去
 function aiWillLoanOut(p){
-  if(p.loan || p.clubId<0 || p.clubId===WORLD.userClub) return false;
+  if(p.loan || p.precontract || p.clubId<0 || p.clubId===WORLD.userClub) return false;
   const c=C(p.clubId);
   if(p.listed || p.injury>20) return false;
   if(!(p.age<=25 || p.age>=31)) return false;
@@ -4387,7 +4392,7 @@ function acceptOffer(i){
   const fail=why=>{toast(why,"bad");return false;};
   const dateError=offerDateError(of); if(dateError) return fail(dateError);
   if(!p || !b || b.id===u.id || p.clubId!==u.id || !u.squad.includes(p.id) || p.loan) return fail("报价失效：球员已离队或处于租借中");
-  if(b.squad.length>=30) return fail("报价失效：买家阵容已满 30 人");
+  if(reservedSquadSize(b)>=30) return fail("报价失效：买家阵容已满 30 人");
   const rules=saleTerms(u,p); if(rules.blocked) return fail(rules.blocked);
   const wage=of.type==="loan"?p.wage*of.wageShare:of.wage||wageDemand(p,b);
   const opt=of.type==="loan"?{nextYear:false,weeks:loanWeeks(of.half)}:{};
@@ -4448,12 +4453,12 @@ function releaseFee(p){
 }
 function releasePlayer(pid){
   const p=P(pid), c=UC();
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(p.clubId!==c.id) return;
   if(p.loan){ toast("租借球员不能解约，归属权在母队","bad"); return; }
   const fee=releaseFee(p);
   const yrs=Math.max(0,(p.contract-WORLD.season+1)-WORLD.day/SEASON_DAYS).toFixed(1);
-  const gk=c.squad.filter(i=>P(i).pos==="GK").length;
-  const warn = c.squad.length<=18 ? "阵容已不足 18 人，无法再解约。" : (p.pos==="GK"&&gk<=2) ? "至少要保留 2 名门将。" : "";
+  const warn = c.squad.length<=SQUAD_FLOOR ? `阵容已不足 ${SQUAD_FLOOR} 人，无法再解约。` : "";
   openModal("解约 "+esc(p.cn),
     `<div class="hint">${esc(p.cn)}（${POS_CN[p.pos]}，${p.age} 岁，能力 ${ovr(p)}）目前周薪 ${money(p.wage)}，合同至 ${p.contract} 年，剩余约 ${yrs} 年。</div>
      <div style="margin-top:10px">一次性遣散费：<b style="color:var(--warn)">${money(fee)}</b> <span class="hint">（剩余合同薪水的 70%）</span></div>
@@ -4465,6 +4470,7 @@ function releasePlayer(pid){
 }
 function doRelease(pid){
   const p=P(pid), c=UC();
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(p.clubId!==c.id || p.loan) return;
   const fee=releaseFee(p), freedWage=p.wage*52;
   if(c.squad.length<=18){ toast("阵容不足 18 人，无法解约","bad"); return; }
@@ -4812,6 +4818,7 @@ function squadMedCA(c){
   return a.length? a[a.length>>1] : 0;
 }
 function aiRenewDecide(c, p){
+  if(p.precontract) return false;
   const mates=c.squad.map(i=>P(i)).filter(q=>q && q.id!==p.id);
   const better=mates.filter(q=>q.ca>p.ca).length;                     // 队内比他强的人数
   const samePos=mates.filter(q=>q.pos===p.pos && q.ca>p.ca).length;   // 同位置比他强的人数
@@ -4957,7 +4964,7 @@ function endSeason(){
     p.age++;
     prospectFate(p);
     if(p.loan) returnLoan(p.id,"season");     // 保险：不该有漏网的
-    if(p.age>=34 && (rnd()< (p.age-33)*0.22 + (p.ca<70?0.25:0))){
+    if(!p.precontract && p.age>=34 && (rnd()< (p.age-33)*0.22 + (p.ca<70?0.25:0))){
       p.retired=true;
       if(p.clubId>=0){ const c=C(p.clubId); c.squad=c.squad.filter(i=>i!==p.id);
         if(c.id===WORLD.userClub) news(`${p.cn} 宣布退役`,`${p.age}岁的 ${p.cn} 结束了职业生涯，共出场 ${p.careerApps} 次，打进 ${p.careerGoals} 球。`,"info"); }
@@ -4965,7 +4972,7 @@ function endSeason(){
       delete WORLD.players[p.id];
       return;
     }
-    if(p.contract<=WORLD.season && p.clubId>=0){
+    if(!p.precontract && p.contract<=WORLD.season && p.clubId>=0){
       const c=C(p.clubId);
       if(c.id!==WORLD.userClub){
         // AI 自动续约 / 放走
@@ -5030,7 +5037,7 @@ function endSeason(){
     if(c.id===WORLD.userClub) return;             // 归队超员不等于授权自动解约
     const cap = 26;                              // 仅 AI 主动清理冗员
     while(c.squad.length>cap){
-      const worst=c.squad.map(i=>P(i)).filter(p=>!p.loan).sort((a,b)=>(a.ca+ (a.pa-a.ca)*0.6)-(b.ca+(b.pa-b.ca)*0.6))[0];
+      const worst=c.squad.map(i=>P(i)).filter(p=>!p.loan&&!p.precontract).sort((a,b)=>(a.ca+ (a.pa-a.ca)*0.6)-(b.ca+(b.pa-b.ca)*0.6))[0];
       if(!worst) break;
       toFreeAgent(worst, c);
     }
@@ -5051,6 +5058,7 @@ function endSeason(){
   WORLD.shortlist=(WORLD.shortlist||[]).filter(sl=>WORLD.players[sl.id]);
   WORLD.season++;
   WORLD.day=0; WORLD.fired=false; WORLD.offers=[];
+  processPrecontractArrivals();
   for(const s of offseasonFacilitySegments(UC(),"scoutRating",restDays)) tickScouting(s.days,s.rating);
   tickProjects(restDays);                    // 补算跳过的休赛期；须在新赛季 AI 开工前结算
   pruneInterest();
@@ -5729,14 +5737,16 @@ function showPlayer(pid){
   } else {
     const canLoan = inTransferWindow() && !p.loan && aiWillLoanOut(p);
     const isFA = p.clubId<0;                          // 自由球员全年可签，不受转会窗限制
-    const canBid = !p.loan && (isFA || inTransferWindow());
+    const canBid = !p.loan && !p.precontract && (isFA || inTransferWindow() || bosmanEligible(p));
     ft=`<button onclick="toggleShortlist(${pid})">${sl?"取消关注":"加入球探名单"}</button>
         ${canLoan?`<button onclick="requestLoan(${pid})">申请租借</button>`:""}
-        ${canBid?`<button class="pri" onclick="makeBid(${pid})">${isFA?"免签签下":"提交报价"}</button>`
-                :(p.loan?'<button disabled title="租借中，不可转会">租借中</button>'
+        ${canBid?`<button class="pri" onclick="makeBid(${pid})">${isFA?"免签签下":bosmanEligible(p)?"选择加盟方式":"提交报价"}</button>`
+                :(p.precontract?'<button disabled>已预签下赛季合同</button>':p.loan?'<button disabled title="租借中，不可转会">租借中</button>'
                         :'<button disabled title="转会窗关闭（自由球员不受限制）">非转会窗口</button>')}
         <button onclick="closeModal()">关闭</button>`;
   }
+  if(inSquad) ft=`<button onclick="assignPositionDialog(${pid})">安排首发位置</button>`+ft;
+  if(p.precontract) h+=`<div class="card">已预签 ${esc(C(p.precontract.to).cn)}，${p.precontract.start} 赛季加盟；届时周薪 ${money(p.precontract.wage)}。</div>`;
   openModal(esc(p.cn)+' <span class="hint" style="font-weight:400">'+(club?esc(club.cn):"自由球员")+'</span>', h, ft);
 }
 /* ---------- 主动推销 ---------- */
@@ -5866,6 +5876,7 @@ function pitchReplies(){
 function loanFeeFor(p,b){ return p.ca>b.rep*1.9 ? Math.round(p.value*0.04/1e4)*1e4 : 0; }   // 玩家租出时对方付的租借费
 function loanOutDialog(pid){
   const p=P(pid), u=UC();
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(!inTransferWindow()){ toast("只能在转会窗内安排外租","bad"); return; }
   if(p.loan){ toast("他已经在租借中","bad"); return; }
   const cands=WORLD.clubs.filter(c=>c.id!==u.id && c.squad.length<28 && p.ca>c.rep*1.35 && p.ca<c.rep*2.2+40)
@@ -5884,11 +5895,11 @@ function loanOutDialog(pid){
 }
 function submitLoanOut(pid){
   const p=P(pid), u=UC(); const b=C(+$("#lo-club").value);
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(!b || p.loan){ closeModal(); return; }
   const t={half:$("#lo-half").value==="1", wageShare:+$("#lo-share").value, minApps:+$("#lo-min").value, fee:loanFeeFor(p,b)};
   if(t.fee>clubSpend(b)) t.fee=0;
   if(u.squad.length-1<18){ toast("阵容不足 18 人，不能再外租","bad"); return; }
-  if(p.pos==="GK" && u.squad.filter(i=>P(i).pos==="GK").length<=2){ toast("至少要保留 2 名门将","bad"); return; }
   if(!aiAcceptLoanTerms(p,b,t)){ toast(`${b.cn} 无法接受这些条款`,"bad"); return; }
   loanPlayer(pid,b.id,t);
   news(`${p.cn} 外租至 ${b.cn}`,`${u.cn} 将 ${p.cn} 租借给 ${b.cn}（${LGS(b)}）${t.half?"至冬窗":"至赛季末"}，对方承担 ${Math.round(t.wageShare*100)}% 工资${t.fee?`并支付租借费 ${money(t.fee)}`:""}${t.minApps?"，承诺 60% 以上出场":""}。每 4 周你会收到他的外租简报。`,"good");
@@ -5928,7 +5939,7 @@ function submitLoanIn(pid){
   const owner=C(p.clubId), t=loanTermsFor(p,u); t.half=!!($("#li-half")&&$("#li-half").value==="1");
   { const r=canAfford(u, t.fee, p.wage*t.wageShare*52, {nextYear:false, weeks:loanWeeks(t.half)});
     if(!r.ok){ toast(affordMsg(u, r, t.fee, p.wage*t.wageShare*52),"bad"); return; } }
-  if(u.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
+  if(reservedSquadSize(u)>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
   if(owner.rep>u.rep+14 && rnd()<0.5){ toast(`${p.cn} 不愿被租到层级更低的球队`,"bad"); closeModal(); return; }
   loanPlayer(pid,u.id,t);
   news(`租入 ${p.cn}`,`${u.cn} 从 ${owner.cn} 租借 ${p.cn} ${t.half?"至冬窗":"至赛季末"}${t.fee?`，租借费 ${money(t.fee)}`:""}，承担 ${Math.round(t.wageShare*100)}% 工资${t.minApps?`。注意出场条款：租期内出场不足 ${Math.round(t.minApps*100)}%，母队可免费召回`:""}。`,"good");
@@ -6006,7 +6017,7 @@ let SELSLOT=null;
 
 function vTactics(v){
   const c=UC(), t=c.tactic;
-  v.appendChild(el("div","",`<h1>战术</h1><div class="sub">点击场上位置，再点击右侧球员完成调整</div>`));
+  v.appendChild(el("div","",`<h1>战术</h1><div class="sub">点击场上位置，再点击球员；两个位置互点可对调。也可在球员档案中安排首发位置，允许任意位置客串。</div>`));
   const matchday=userFixtureOn(WORLD.day);
   if(matchday){
     const ready=el("div","card",`<b>比赛日 · ${esc(C(matchday.home).cn)} vs ${esc(C(matchday.away).cn)}</b><div class="hint" style="margin:6px 0">调整会自动保存，准备好后返回赛前确认。</div>`);
@@ -6031,7 +6042,7 @@ function vTactics(v){
     const d=el("div","fmt-slot"+(SELSLOT===i?" sel":"")+(p&&p.condition<70?" tired":""));
     d.style.left=s[2]+"%"; d.style.bottom=s[1]+"%"; d.style.top="auto";
     d.innerHTML=`<div class="p">${POS_CN[s[0]]}</div><div class="n">${p?esc(p.cn.split("·").pop()):"—"}</div>
-      <div class="fs">${p?ovr(p)+" · "+Math.round(p.condition)+"%":""}</div>`;
+      <div class="fs">${p?ovr(p)+" · "+Math.round(p.condition)+"%":""}</div>${p&&p.pos!==s[0]?`<div class="fs" style="color:var(--warn)">客串 · 适配${Math.round(posFit(p,s[0])*100)}%</div>`:""}`;
     d.onclick=()=>{
       if(SELSLOT!=null && SELSLOT!==i){
         // 两个槽位互点 = 对调位置（可用球员列表里已经没有首发了，得走这条路）
@@ -6130,6 +6141,31 @@ function vTactics(v){
     toast(`已换成 ${e.target.value}，原首发留下 ${kept} 人`); render(); };
   const off=$("#offs"); if(off) off.onchange=e=>c.tactic.offside=e.target.checked;
   const cnt=$("#cntr"); if(cnt) cnt.onchange=e=>c.tactic.counter=e.target.checked;
+}
+
+function positionEffect(p,pos){ return Math.round((0.65+0.35*posFit(p,pos))*1000)/10; }
+function assignPositionDialog(pid){
+  const p=P(pid),c=UC(); if(!p||p.clubId!==c.id||!c.squad.includes(pid)) return;
+  if(CURMATCH&&!CURMATCH.done){toast("比赛进行中，请使用临场换人面板","bad");return;}
+  const slots=FORMATIONS[c.tactic.formation],current=c.lineup.indexOf(pid);
+  const preferred=current>=0?current:slots.reduce((best,sl,i)=>posFit(p,sl[0])>posFit(p,slots[best][0])?i:best,0);
+  openModal("安排首发位置 · "+esc(p.cn),
+    `<div class="hint">本职${POS_CN[p.pos]}；可安排到当前阵型任意位置。首发之间对调，替补进入时原首发退到替补席。<br>适配越低，比赛执行属性折减越多；本职和永久能力保持原值。<br>本职适配100%、副位置90%、相邻位置72%、其他外场50%、门将与外场互换18%；对应执行属性保留100%、96.5%、90.2%、82.5%、71.3%。</div>
+     <div style="margin-top:12px"><label for="assign-slot">首发位置</label><select id="assign-slot" style="width:100%;max-width:100%;margin-top:6px">${FORMATIONS[c.tactic.formation].map((sl,i)=>`<option value="${i}" ${i===preferred?"selected":""}>${i+1}. ${POS_CN[sl[0]]} · 适配${Math.round(posFit(p,sl[0])*100)}% · 执行属性${positionEffect(p,sl[0])}% · ${c.lineup[i]!=null?esc(P(c.lineup[i]).cn):"空缺"}</option>`).join("")}</select></div>
+     <div class="hint" style="margin-top:8px">伤病与本场停赛仍不能上场。门将客串另有扑救折减。</div>`,
+    `<button class="pri" onclick="assignPosition(${pid},+$('#assign-slot').value)">确认安排</button><button onclick="closeModal()">取消</button>`);
+}
+function assignPosition(pid,slot){
+  const c=UC(),p=P(pid),slots=FORMATIONS[c.tactic.formation];
+  if(!p||p.clubId!==c.id||!c.squad.includes(pid)||!Number.isInteger(slot)||slot<0||slot>=slots.length)return false;
+  if(CURMATCH&&!CURMATCH.done){toast("比赛进行中，请使用临场换人面板","bad");return false;}
+  if(p.injury>0||suspensionFor(p,clubCompetition(c))>0){toast("该球员无法出场","bad");return false;}
+  const old=c.lineup.indexOf(pid),out=c.lineup[slot];
+  if(old>=0)c.lineup[old]=out;
+  c.lineup[slot]=pid;c.subs=(c.subs||[]).filter(id=>id!==pid&&id!==out);
+  if(old<0&&out!=null)c.subs.unshift(out);
+  c.subs=c.subs.slice(0,BENCH_MAX);SELSLOT=null;
+  toast(`${p.cn} 已安排为${POS_CN[slots[slot][0]]}，适配${Math.round(posFit(p,slots[slot][0])*100)}%`);closeModal();render();return true;
 }
 
 /* ================= 大名单 ================= */
@@ -6322,6 +6358,8 @@ function vTransfer(v){
     const b=el("button","sm","查看降级挂牌"); b.onclick=()=>{TFILTER.tier="rel"; TFILTER.q=""; TFILTER.pos=""; TFILTER.maxFee=0; TFILTER.minCa=0; TFILTER.maxAge=40; render();};
     box.appendChild(b); v.appendChild(box);
   }
+  const arrivals=pendingArrivals(c);
+  if(arrivals.length)v.appendChild(el("div","card",`<h3>已预签 · 下赛季加盟</h3>${arrivals.map(p=>`<div style="padding:6px 0;cursor:pointer" onclick="showPlayer(${p.id})">${esc(p.cn)} · ${p.precontract.start} 赛季加盟 · 周薪 ${money(p.precontract.wage)}</div>`).join("")}`));
   // 收到的报价
   const offers=WORLD.offers||[];
   if(offers.length){
@@ -6527,38 +6565,75 @@ function toggleShortlist(pid){
   else { WORLD.shortlist.push({id:pid,know:0}); toast("已加入球探名单，球探将开始收集情报"); }
   closeModal(); render();
 }
+function bosmanEligible(p){
+  return !!p&&p.clubId>=0&&p.clubId!==WORLD.userClub&&!p.loan&&!p.precontract&&p.contract===WORLD.season&&WORLD.day>=winterDay();
+}
+function pendingArrivals(c){ return (WORLD.precontracts||[]).map(P).filter(p=>p?.precontract?.to===c.id); }
+function reservedSquadSize(c){ return c.squad.length+pendingArrivals(c).length; }
+function bidPrecontract(p){ return bosmanEligible(p)&&($("#bid-arrival")?.value||"precontract")==="precontract"; }
+function updBidArrival(pid){
+  const pre=bidPrecontract(P(pid)),box=$("#bid-fee-fields");if(box)box.hidden=pre;
+  const btn=$("#bid-go");if(btn)btn.textContent=pre?"提交免签预签":"提交转会报价";
+  const hint=$("#bid-arrival-hint");if(hint)hint.textContent=pre?"免转会费，下赛季到队后开始付工资。":"本窗付费谈妥后立即加盟，本季起支付工资。";
+  const nego=$("#bid-nego");if(nego)nego.innerHTML="";
+  updBidCost(pid);
+}
+function signPrecontract(p,c,wage,years){
+  if(!bosmanEligible(p)||c.id!==WORLD.userClub||reservedSquadSize(c)>=30||!Number.isFinite(wage)||wage<=0||!Number.isInteger(years)||years<2||years>5)return false;
+  if(!canAfford(c,0,0,{capAnnual:wage*52}).ok)return false;
+  p.precontract={to:c.id,from:p.clubId,start:WORLD.season+1,wage,years};
+  (WORLD.precontracts||(WORLD.precontracts=[])).push(p.id);
+  p.listed=false;p.autoSell=false;
+  WORLD.offers=(WORLD.offers||[]).filter(o=>o.pid!==p.id);
+  WORLD.interest=interestList().filter(o=>o.pid!==p.id);
+  news(`预签 ${p.cn}`,`${c.cn} 与 ${p.cn} 签订下赛季生效的合同；本季继续效力 ${C(p.clubId).cn}，下赛季周薪 ${money(wage)}，签约 ${years} 年。`,"good");return true;
+}
+function processPrecontractArrivals(){
+  for(const p of (WORLD.precontracts||[]).map(P).filter(Boolean)){
+    const d=p.precontract;if(!d||d.start>WORLD.season)continue;
+    if(transferPlayer(p.id,d.to,0,d.wage,d.years,{arrival:true})){
+      delete p.precontract;p.contract=d.start+d.years-1;p.value=calcValue(p);
+      news("预签球员到队",`${p.cn} 已按约加盟 ${C(d.to).cn}，周薪 ${money(p.wage)}，合同至 ${p.contract} 年。`,"good");
+    }
+  }
+  if(WORLD.precontracts)WORLD.precontracts=WORLD.precontracts.filter(id=>P(id)?.precontract);
+}
 function makeBid(pid){
   const p=P(pid), c=UC();
+  if(!p||p.clubId===c.id||p.precontract){toast("该球员已在队内或已有预签合同","bad");return;}
   const isFA = p.clubId<0;
-  if(!isFA && !inTransferWindow()){ toast("当前不在转会窗口","bad"); return; }
+  if(!isFA && !bosmanEligible(p) && !inTransferWindow()){ toast("当前不在转会窗口","bad"); return; }
   if(p.loan){ toast("他正在租借中，租期结束前不可转会","bad"); return; }
   const ask=isFA?0:askingPrice(p);
   const wg=wageDemand(p,c);
+  const bosman=bosmanEligible(p);
   const terms=isFA?null:saleTerms(C(p.clubId),p);
   openModal((isFA?"签下 ":"为 ")+esc(p.cn)+(isFA?"":" 报价"),
     `${isFA
        ? `<div class="hint">他是自由球员，<b style="color:var(--ok,#00d47e)">无需转会费</b>，只谈合同。他要求周薪约 <b>${money(wg)}</b>。${inTransferWindow()?"":"<br>自由球员不受转会窗限制，随时可签。"}</div>`
+       : bosman?`<div class="hint">合同本季末到期，可免签预签，也可向原俱乐部付费提前加盟。要求周薪约 <b>${money(wg)}</b>。</div><div style="margin-top:12px"><label for="bid-arrival">加盟方式</label><select id="bid-arrival" onchange="updBidArrival(${pid})" style="max-width:100%"><option value="precontract">免签预签 · 下赛季加盟</option><option value="now" ${inTransferWindow()?"":"disabled"}>付费转会 · 本窗立即加盟</option></select><div class="hint" id="bid-arrival-hint"></div></div>`
        : `<div class="hint">对方要价约 <b style="color:var(--acc)">${money(ask)}</b>，球员周薪要求约 <b>${money(wg)}</b>${p.listed?'　<span class="tag t-w">他被挂牌，卖方有出售意愿</span>':''}<br>可以尝试压价，对方最多还一次价；再谈不拢本窗就不谈了。</div>`}
-     ${terms?`<div class="hint" style="margin-top:8px;color:var(--warn)">${terms.blocked?`卖方暂不放人：${esc(terms.blocked)}。`:terms.premium>1?`该位置替补紧缺，卖方愿以 <b>${money(terms.fee)}</b> 放人（普通要价的 ${terms.premium} 倍）。提高转会费可继续谈判。`:isRelegationSale(p)?"降级挂牌：卖方愿意按挂牌价谈判。":""}</div>`:""}
-     ${(!isFA&&terms&&!terms.blocked&&terms.premium===1&&(perfIndex(p)>=0.35||(p.clubId>=0&&p.ca>C(p.clubId).rep*1.9)))?'<div class="hint" style="margin-top:6px;color:var(--warn)">该球员是市场热门，报价若仅略高于要价，可能被其他俱乐部截胡；高出要价 8% 以上更稳妥。</div>':''}
+     ${terms&&!bosman?`<div class="hint" style="margin-top:8px;color:var(--warn)">${terms.blocked?`卖方暂不放人：${esc(terms.blocked)}。`:terms.premium>1?`该位置替补紧缺，卖方愿以 <b>${money(terms.fee)}</b> 放人（普通要价的 ${terms.premium} 倍）。提高转会费可继续谈判。`:isRelegationSale(p)?"降级挂牌：卖方愿意按挂牌价谈判。":""}</div>`:""}
+     ${(!isFA&&!bosman&&terms&&!terms.blocked&&terms.premium===1&&(perfIndex(p)>=0.35||(p.clubId>=0&&p.ca>C(p.clubId).rep*1.9)))?'<div class="hint" style="margin-top:6px;color:var(--warn)">该球员是市场热门，报价若仅略高于要价，可能被其他俱乐部截胡；高出要价 8% 以上更稳妥。</div>':''}
      ${isFA? '<input id="bid-fee" type="hidden" value="0">'
-           : `<div style="margin-top:12px"><label>转会费（${CURSYM()}）</label><input id="bid-fee" type="number" value="${toCurIn(ask)}" style="width:180px"></div>`}
+           : `<div id="bid-fee-fields" ${bosman?"hidden":""} style="margin-top:12px"><label for="bid-fee">转会费（${CURSYM()}）</label><input id="bid-fee" type="number" value="${toCurIn(ask)}" style="width:180px"></div>`}
      <div style="margin-top:8px"><label>周薪（${CURSYM()}）</label><input id="bid-wage" type="number" value="${toCurIn(wg)}" style="width:180px"></div>
-     <div style="margin-top:8px"><label>合同年限</label><select id="bid-yr" onchange="updBidCost()"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
+     <div style="margin-top:8px"><label>合同年限</label><select id="bid-yr" onchange="updBidCost(${pid})"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
      <div class="hint" id="bid-nego" style="margin-top:10px"></div>
      <div class="hint" id="bid-cost" style="margin-top:12px"></div>`,
     `<button class="pri" id="bid-go" onclick="submitBid(${pid})">${isFA?"签下":"提交报价"}</button><button onclick="closeModal()">取消</button>`);
   const f=$("#bid-fee"), w=$("#bid-wage");
-  if(f) f.oninput=updBidCost;
-  if(w) w.oninput=updBidCost;
-  updBidCost();
+  if(f) f.oninput=()=>updBidCost(pid);
+  if(w) w.oninput=()=>updBidCost(pid);
+  if(bosman)updBidArrival(pid);else updBidCost(pid);
 }
 /* 报价弹窗底部那行：这笔合同本季占用多少、之后每季多少。合同年限一变就重算。*/
-function updBidCost(){
+function updBidCost(pid){
   const box=$("#bid-cost"); if(!box) return;
-  const c=UC(), fee=fromCur(($("#bid-fee")||{}).value||0), wg=fromCur(($("#bid-wage")||{}).value||0), yr=+(($("#bid-yr")||{}).value||3);
-  const wks=remWeeks(c), av=avail(c), now=fee+wg*52*wks/52, cn=committedNext(c), cap=wageCap(c);
-  const r=canAfford(c, fee, wg*52);
+  const pre=bidPrecontract(P(pid));
+  const c=UC(), fee=pre?0:fromCur(($("#bid-fee")||{}).value||0), wg=fromCur(($("#bid-wage")||{}).value||0), yr=+(($("#bid-yr")||{}).value||3);
+  const wks=pre?0:remWeeks(c), av=avail(c), now=fee+wg*wks, cn=committedNext(c), cap=wageCap(c);
+  const r=canAfford(c, fee, pre?0:wg*52,{capAnnual:wg*52});
   box.innerHTML=`可用资金 <b style="color:${av>=0?"var(--acc)":"var(--bad)"}">${money(av)}</b>。`
     +`这份合同本季占用 <b style="color:${now>av?"var(--bad)":""}">${money(Math.round(now))}</b>`
     +`（转会费 ${money(fee)} + ${wks} 周工资 ${money(Math.round(wg*52*wks/52))}），之后每季 ${money(wg*52)}，共 ${yr} 年。<br>`
@@ -6578,26 +6653,30 @@ function sellerFloor(seller, p){
 }
 function submitBid(pid){
   const p=P(pid), c=UC();
+  if(!p||p.clubId===c.id||p.precontract){toast("该球员已在队内或已有预签合同","bad");return;}
   const isFA = p.clubId<0;
-  if(!isFA && !inTransferWindow()){ toast("当前不在转会窗口","bad"); closeModal(); return; }
+  if(!isFA && !bosmanEligible(p) && !inTransferWindow()){ toast("当前不在转会窗口","bad"); closeModal(); return; }
   if(p.loan){ toast("他正在租借中，租期结束前不可转会","bad"); closeModal(); return; }
-  const fee=isFA?0:Math.round(fromCur($("#bid-fee").value)), wg=Math.round(fromCur($("#bid-wage").value)), yr=+$("#bid-yr").value;
-  const ask=isFA?0:askingPrice(p), need=wageDemand(p,c);
-  { const r=canAfford(c, fee, wg*52); if(!r.ok){ toast(affordMsg(c, r, fee, wg*52),"bad"); return; } }
-  if(c.squad.length>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
+  const pre=bidPrecontract(p);
+  if(!isFA&&!pre&&!inTransferWindow()){toast("当前不在转会窗口，不能提前加盟","bad");return;}
+  const fee=(isFA||pre)?0:Math.round(fromCur($("#bid-fee").value)), wg=Math.round(fromCur($("#bid-wage").value)), yr=+$("#bid-yr").value;
+  if(!Number.isFinite(fee)||fee<0||!Number.isFinite(wg)||wg<=0||!Number.isInteger(yr)||yr<2||yr>5){toast("报价条款无效","bad");return;}
+  const ask=(isFA||pre)?0:askingPrice(p), need=wageDemand(p,c);
+  { const r=canAfford(c, fee, pre?0:wg*52,{capAnnual:wg*52}); if(!r.ok){ toast(affordMsg(c, r, fee, wg*52),"bad"); return; } }
+  if(reservedSquadSize(c)>=30){ toast("阵容已满（上限 30 人）","bad"); return; }
   const seller=p.clubId>=0?C(p.clubId):null;
-  if(seller && !canSell(seller,p,fee)){
+  if(seller && !pre && !canSell(seller,p,fee)){
     const terms=saleTerms(seller,p);
     if(terms.blocked){ toast(`${seller.cn} 暂不出售——${terms.blocked}`,"bad"); return; }
     const box=$("#bid-nego");
     if(box) box.innerHTML=`<span style="color:var(--warn)">${esc(seller.cn)} 需要补回该位置，愿以 <b>${money(terms.fee)}</b> 放人。可提高报价后再次提交。</span>`;
     const fi=$("#bid-fee"); if(fi) fi.value=toCurIn(terms.fee);
     const btn=$("#bid-go"); if(btn) btn.textContent="按放行价提交";
-    updBidCost();
+    updBidCost(pid);
     toast(`${seller.cn} 愿以 ${money(terms.fee)} 放人，已填入放行价`,"warn");
     return;
   }
-  if(!isFA && seller && fee < ask){
+  if(!isFA && !pre && seller && fee < ask){
     const floor=sellerFloor(seller,p);
     if(fee < floor){
       if(p.negoLock===winKey()){ toast(`${seller.cn} 本窗不再和你压价谈 ${p.cn}——只接受要价 ${money(ask)}`,"bad"); closeModal(); return; }
@@ -6609,7 +6688,7 @@ function submitBid(pid){
         const box=$("#bid-nego");
         if(box) box.innerHTML=`<span style="color:var(--warn)">${esc(seller.cn)} 还价 <b>${money(counter)}</b>（要价 ${money(ask)}）。你可以接受或再出一次价，再谈不拢对方就会退出。</span>`;
         const btn=$("#bid-go"); if(btn) btn.textContent="按还价成交 / 再出一次";
-        if(typeof updBidCost==="function") updBidCost();
+        if(typeof updBidCost==="function") updBidCost(pid);
         toast(`${seller.cn} 还价 ${money(counter)}`,"warn");
         return;
       }
@@ -6621,6 +6700,11 @@ function submitBid(pid){
   if(wg < need*0.92){ toast(`${p.cn} 认为薪资不足，要求 ${money(need)}/周`,"bad"); closeModal(); return; }
   // 球员意愿：声望差
   if(seller && !playerAcceptsMove(p,c,seller,wg,need)){ toast(`${p.cn} 不愿加盟——认为这是职业生涯的倒退`,"bad"); closeModal(); return; }
+  if(pre){
+    if(signPrecontract(p,c,wg,yr)){toast(`已预签 ${p.cn}，下赛季加盟`);closeModal();render();}
+    else toast("预签未能成交，请重新检查条件","bad");
+    return;
+  }
   // 抢手球员：报价仅略高于要价时，可能被更大的俱乐部截胡
   if(seller && !relegationGrace(p) && fee < ask*1.08 && (perfIndex(p)>=0.35 || p.ca>seller.rep*1.9) && rnd()<0.14){
     const rivals=WORLD.clubs.filter(r=>r.id!==c.id && r.id!==seller.id && r.rep>c.rep+3 && r.squad.length<29
@@ -6649,6 +6733,7 @@ function playerAcceptsMove(p,c,seller,wage,need){
 }
 function renewContract(pid){
   const p=P(pid), c=UC();
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(ownerOf(p)!==c.id){ toast("只有母队能和他谈续约","bad"); return; }
   const nw=Math.round(Math.max(p.wage*1.15, calcWage(p,c.rep,c)*(1+ (p.pa-p.ca)/300))/50)*50;
   openModal("续约 "+esc(p.cn),
@@ -6672,6 +6757,7 @@ function updRenewCost(pid){
 }
 function doRenew(pid,need){
   const p=P(pid), c=UC(); const w=Math.round(fromCur($("#rn-w").value)), y=+$("#rn-y").value;
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(ownerOf(p)!==c.id) return;
   if((p.unrest||0)>=2){ toast(`${p.cn} 拒绝续约——他已要求转会`,"bad"); return; }
   if(w<need*0.95){ toast(`${p.cn} 拒绝了这份合同`,"bad"); return; }
@@ -6691,6 +6777,7 @@ function doRenew(pid,need){
    到价的报价会照要价出（不再砍）。取消挂牌 / 改要价都会清掉「到价自动成交」。*/
 function listPlayer(pid){
   const p=P(pid), u=UC();
+  if(p?.precontract){ toast("球员已签订下赛季生效的合同","bad"); return; }
   if(p.loan){ toast("租借球员的归属权在母队","bad"); return; }
   const ask=askingPrice(p), cur=p.listed? (p.askPrice||ask) : ask;
   const yrs=Math.max(0, p.contract-WORLD.season);
