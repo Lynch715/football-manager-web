@@ -445,6 +445,14 @@ button.nav:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
 @media(max-width:900px) and (max-height:520px) and (orientation:landscape){
   html:not(.kb) #side{display:flex}
 }
+.cheat-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin:12px 0}
+.cheat-fields input,.cheat-fields select{display:block;width:100%;min-height:40px;margin-top:4px}
+.cheat-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.cheat-actions button,.cheat-fields+button{min-height:40px}
+.cheat-results{display:grid;gap:6px;max-height:360px;overflow:auto;margin-top:8px}
+.cheat-player{text-align:left;white-space:normal;min-height:44px}
+.cheat-player small{display:block;color:var(--dim)}
+@media(max-width:900px){#side .nav-cheats{display:none}}
 </style>
 </head>
 <body>
@@ -1277,12 +1285,17 @@ function injuryHitsPotential(p,days){
   if(p.age>23 || days<60) return;
   if(rnd() >= (days>=100?0.5:0.3)) return;
   const a=p.pa;
-  p.pa=Math.max(p.ca+2, p.pa-ri(8,24));
+  const damagedPA=Math.max(p.ca+2, p.pa-ri(8,24));
   const n=ri(1,2);
   for(let i=0;i<n;i++){ const k=pick(["pace","accel","agility","stamina","jumping","strength"]); if(p.a[k]>1) p.a[k]--; }
-  p.ca=calcCA(p.a,p.pos); p.value=calcValue(p);
-  if(p.clubId>=0 && p.clubId===WORLD.userClub)
-    news(`${p.cn} 的伤可能留下后遗症`,`队医的判断：${p.cn} 这次伤得很重，恢复后身体素质会打折扣，教练组把对他的预期从 ${Math.round(a/2)} 下调到 ${Math.round(p.pa/2)}。`,"bad");
+  p.ca=calcCA(p.a,p.pos);
+  p.pa=Math.max(p.ca,Math.min(200,a,damagedPA));
+  p.value=calcValue(p);
+  if(p.clubId>=0 && p.clubId===WORLD.userClub){
+    const before=Math.round(a/2), after=Math.round(p.pa/2);
+    const assessment=after<before?`潜力评估从 ${before} 下调到 ${after}。`:`潜力评估维持在 ${after}。`;
+    news(`${p.cn} 的伤可能留下后遗症`,`队医的判断：${p.cn} 这次伤得很重，恢复后身体素质会打折扣。${assessment}`,"bad");
+  }
 }
 function calcCA(A,pos){
   const w=POS_WEIGHTS[pos]; let s=0,t=0;
@@ -3646,7 +3659,7 @@ function canAfford(c, fee, annual, opt){
   const cash  = (fee||0) + annual*weeks/52;
   const av    = avail(c);
   if(cash > av) return {ok:false, why:"cash", gap:Math.round(cash-av), weeks, cash:Math.round(cash)};
-  if(opt.nextYear!==false && capAn>0){
+  if(opt.nextYear!==false && capAn>0 && !cheatWageRelaxed(c)){
     const next=committedNext(c)+capAn, cap=wageCap(c);
     if(next > cap) return {ok:false, why:"cap", gap:Math.round(next-cap), next:Math.round(next), cap, weeks};
   }
@@ -5327,7 +5340,7 @@ function openModal(title, html, footer){
   $("#modal-ft").innerHTML=footer||'<button onclick="closeModal()">关闭</button>';
   $("#modal").classList.add("on");
 }
-function closeModal(){ $("#modal").classList.remove("on");
+function closeModal(){ if(CHEAT_PENDING)return; $("#modal").classList.remove("on");
   if(typeof PREMATCH!=="undefined") PREMATCH=null;
   // 换人面板若从右上角 × 关闭，也要恢复比赛
   if(typeof SUBRESUME!=="undefined" && SUBRESUME && CURMATCH && VIEW==="match" && !CURMATCH.done){ SUBRESUME=false; SUBQ=[]; SUBOUT=null; toggleplay(true); }
@@ -5366,7 +5379,7 @@ const NAV=[
   ["球队",[["squad","👥","阵容"],["tactics","⚽","战术"],["training","🏃","训练"],["youth","🌱","青训"]]],
   ["运营",[["transfer","💱","转会"],["scout","🔍","球探"],["finance","💷","财政"],["build","🏗","建设"],["club","🏟","俱乐部"]]],
   ["世界",[["league","🏆","赛事"],["stats","📊","数据"],["history","📜","历史"]]],
-  ["系统",[["save","💾","存档"],["crests","🛡","队徽"],["help","❓","说明"]]]
+  ["系统",[["save","💾","存档"],["cheats","🛠","作弊台"],["crests","🛡","队徽"],["help","❓","说明"]]]
 ];
 function renderNav(){
   const s=$("#side"); s.innerHTML="";
@@ -5375,7 +5388,7 @@ function renderNav(){
     items.forEach(([id,ic,nm])=>{
       const unread = id==="inbox"? WORLD.inbox.filter(m=>!m.read).length
                    : id==="transfer"? (WORLD.offers||[]).length : 0;
-      const d=el("button","nav"+(VIEW===id?" on":""),
+      const d=el("button","nav"+(id==="cheats"?" nav-cheats":"")+(VIEW===id?" on":""),
         `<i>${ic}</i>${nm}${unread?`<span class="badge">${unread}</span>`:""}`);
       d.type="button"; if(VIEW===id) d.setAttribute("aria-current","page");
       d.onclick=()=>go(id);
@@ -5387,7 +5400,7 @@ function renderNav(){
 function creatorNotice(){
   return el("p","creator-notice","发现更多游戏，请在小红书、闲鱼搜索原创作者“模拟游戏大全”。");
 }
-function go(v){ VIEW=v; SORT={k:null,d:1}; render(); }
+function go(v){ if(CHEAT_PENDING||SAVE_DELETING)return; VIEW=v; SORT={k:null,d:1}; render(); }
 
 function renderTop(){
   const c=UC();
@@ -5405,15 +5418,15 @@ function renderTop(){
 /* 同一页面里的操作（筛选、排序、接受报价……）重画时保留滚动位置；只有换页才回顶部。
    原来每次 render 都 scrollTop=0，手机上筛完要再滑回去。 */
 let LAST_VIEW=null;
-function render(){
+function render(dirty=true){
   refreshSuspensions();
-  markDirty();
+  if(dirty)markDirty();
   renderNav(); renderTop();
   const v=$("#view");
   const keepY = (LAST_VIEW===VIEW)? v.scrollTop : 0;
   const fn={home:vHome,inbox:vInbox,squad:vSquad,tactics:vTactics,training:vTraining,youth:vYouth,
     transfer:vTransfer,scout:vScout,finance:vFinance,build:vBuild,club:vClub,league:vLeague,schedule:vSchedule,
-    stats:vStats,history:vHistory,save:vSave,crests:vCrests,help:vHelp,match:vMatch}[VIEW]||vHome;
+    stats:vStats,history:vHistory,save:vSave,cheats:vCheats,crests:vCrests,help:vHelp,match:vMatch}[VIEW]||vHome;
   v.innerHTML=""; fn(v);
   LAST_VIEW=VIEW;
   v.scrollTop=keepY;
@@ -6348,7 +6361,7 @@ function vTransfer(v){
   v.appendChild(el("div","",`<h1>转会市场</h1><div class="sub" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px">
     <span>可用资金 <b style="color:${avail(c)>=0?"var(--acc)":"var(--bad)"}">${money(avail(c))}</b></span>
     ${(()=>{const n=c.squad.map(i=>P(i)).filter(p=>p&&p.listed&&p.autoSell).length; return n?`<span class="tag t-ok">${n} 名球员设置了到价自动成交</span>`:"";})()}
-    <span>下季工资承诺 <b style="color:${committedNext(c)>wageCap(c)?"var(--bad)":"var(--ok,#00d47e)"}">${money(committedNext(c))}</b> <span class="hint">/ 上限 ${money(wageCap(c))}</span></span>
+    <span>下季工资承诺 <b style="color:${!cheatWageRelaxed(c)&&committedNext(c)>wageCap(c)?"var(--bad)":"var(--ok,#00d47e)"}">${money(committedNext(c))}</b> <span class="hint">${cheatWageRelaxed(c)?"· 上限已放宽":"/ 上限 "+money(wageCap(c))}</span></span>
     ${inTransferWindow()?`<span class="tag t-ok">${windowName()}开启中 · 还剩 ${windowDaysLeft()} 天</span>${isDeadline()?' <span class="tag t-w">截止日临近</span>':''}`:`<span class="tag t-w">转会窗关闭</span> <span class="hint">下一窗口约 ${nextWindowIn()} 天后开启；自由球员不受转会窗限制，随时可签</span>`}</div>`));
 
   const rel=Object.values(WORLD.players).filter(isRelegationSale);
@@ -6632,12 +6645,12 @@ function updBidCost(pid){
   const box=$("#bid-cost"); if(!box) return;
   const pre=bidPrecontract(P(pid));
   const c=UC(), fee=pre?0:fromCur(($("#bid-fee")||{}).value||0), wg=fromCur(($("#bid-wage")||{}).value||0), yr=+(($("#bid-yr")||{}).value||3);
-  const wks=pre?0:remWeeks(c), av=avail(c), now=fee+wg*wks, cn=committedNext(c), cap=wageCap(c);
+  const wks=pre?0:remWeeks(c), av=avail(c), now=fee+wg*wks, cn=committedNext(c), cap=wageCap(c), relaxed=cheatWageRelaxed(c);
   const r=canAfford(c, fee, pre?0:wg*52,{capAnnual:wg*52});
   box.innerHTML=`可用资金 <b style="color:${av>=0?"var(--acc)":"var(--bad)"}">${money(av)}</b>。`
     +`这份合同本季占用 <b style="color:${now>av?"var(--bad)":""}">${money(Math.round(now))}</b>`
     +`（转会费 ${money(fee)} + ${wks} 周工资 ${money(Math.round(wg*52*wks/52))}），之后每季 ${money(wg*52)}，共 ${yr} 年。<br>`
-    +`下季工资承诺将从 ${money(cn)} 升到 <b style="color:${cn+wg*52>cap?"var(--bad)":""}">${money(cn+wg*52)}</b> / ${inCapTransition(c)?"本季上限（过渡期）":"上限"} ${money(cap)}。`
+    +`下季工资承诺将从 ${money(cn)} 升到 <b style="color:${!relaxed&&cn+wg*52>cap?"var(--bad)":""}">${money(cn+wg*52)}</b>${relaxed?" · 上限已放宽":" / "+(inCapTransition(c)?"本季上限（过渡期）":"上限")+" "+money(cap)}。`
     +(r.ok?"":`<br><span style="color:var(--bad)">${r.why==="cash"?"可用资金不足":(inCapTransition(c)?"超出本季工资上限（过渡期）":"超出董事会工资上限")}，差 ${money(r.gap)}${r.why==="cap"?"/年":""}。</span>`);
 }
 /* 卖方底线。相对 askingPrice（它已经含了合同年限折扣），越是「他们本来就想卖」的人越能砍。
@@ -6750,9 +6763,9 @@ function updRenewCost(pid){
   const box=$("#rn-cost"); if(!box) return;
   const p=P(pid), c=UC(), w=($("#rn-w")&&$("#rn-w").value!=="")? fromCur($("#rn-w").value) : p.wage;
   const shareK=p.loan? (1-p.loan.wageShare):1, d=Math.round((w-p.wage)*shareK), inc=d*52;
-  const cn=committedNext(c), cap=wageCap(c), has=p.contract>WORLD.season;
+  const cn=committedNext(c), cap=wageCap(c), has=p.contract>WORLD.season, relaxed=cheatWageRelaxed(c);
   const next=cn+(has? inc : w*52*shareK);
-  box.innerHTML=`涨薪 ${money(d)}/周。下季工资承诺 ${money(cn)} → <b style="color:${next>cap?"var(--bad)":""}">${money(Math.round(next))}</b> / 上限 ${money(cap)}。`
+  box.innerHTML=`涨薪 ${money(d)}/周。下季工资承诺 ${money(cn)} → <b style="color:${!relaxed&&next>cap?"var(--bad)":""}">${money(Math.round(next))}</b>${relaxed?" · 上限已放宽":" / 上限 "+money(cap)}。`
     +(d<=0?"　<span class=\"hint\">原薪或降薪续约不占用额度。</span>":"");
 }
 function doRenew(pid,need){
@@ -6883,7 +6896,7 @@ function vFinance(v){
   const wk=weeklyWages(c);
   v.appendChild(el("div","",`<h1>财政</h1><div class="sub">${LGN(c)} · ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季</div>`));
   fin3(c);
-  const av=avail(c), cn=committedNext(c), cap=wageCap(c), overCap=cn>cap;
+  const av=avail(c), cn=committedNext(c), cap=wageCap(c), relaxed=cheatWageRelaxed(c), overCap=!relaxed&&cn>cap;
   const g=el("div","grid4");
   [["银行余额",money(f.balance),f.balance<0?"警告：透支":"可用现金",""],
    [av>=0?"可用资金":"资金缺口", money(Math.abs(av)),
@@ -6891,7 +6904,7 @@ function vFinance(v){
     av<0?"#e5484d":""],
    ["周薪支出",money(wk),"年化 "+money(wk*52),""],
    ["下季工资承诺", money(cn),
-    (inCapTransition(c)
+    relaxed?"作弊台已放宽上限":(inCapTransition(c)
       ? `过渡期上限 ${money(cap)}，董事会要求逐季压缩至预计营收的 ${Math.round(wageCapK(c)*100)}%（${money(capTarget(c))}）`
       : `上限 ${money(cap)}（预计营收 ${money(f.rev0)} 的 ${Math.round(wageCapK(c)*100)}%）`)
     + `· 已占 ${(cn/Math.max(1,cap)*100).toFixed(0)}%`,
@@ -6905,8 +6918,8 @@ function vFinance(v){
     <b>可用资金</b> = 余额 ${money(f.balance)} + 本季剩余预计营收 ${money(revRemain(c))} × ${Math.round((1-OPEX_RATE)*100)}% − 本季剩余工资 ${money(wageRemain(c))}（${remWeeks(c)} 周） − 董事会锁定 ${money(f.locked)}${f.grant?` + 追加 ${money(f.grant)}`:""}<br>
     预计营收按最保守估：赞助、转播、联赛主场门票、保底名次奖金；杯赛和欧战奖金不计入，到账后直接增加可用资金。<br>
     转会费和工资都从这一个数里扣——工资明年还要付，明年这个数就自动少了，所以两者之间不需要汇率。<br>
-    <b>下季工资承诺</b>是下赛季仍在合同期的自有球员年薪合计。它超过上限时签不了抬高承诺的新约，只能原薪续约、等合同到期或卖人。
-    ${inCapTransition(c)?`<br>你现在的工资高于董事会的目标线（预计营收的 ${Math.round(wageCapK(c)*100)}%），处在<b>过渡期</b>：本季上限按赛季初现有工资的 ${Math.round(CAP_RATCHET*100)}% 核定，每季收紧一次，直到落回目标线。`:""}
+    <b>下季工资承诺</b>是下赛季仍在合同期的自有球员年薪合计。${relaxed?"作弊台已放宽董事会上限，本季工资仍占用可用资金。":"它超过上限时签不了抬高承诺的新约，只能原薪续约、等合同到期或卖人。"}
+    ${!relaxed&&inCapTransition(c)?`<br>你现在的工资高于董事会的目标线（预计营收的 ${Math.round(wageCapK(c)*100)}%），处在<b>过渡期</b>：本季上限按赛季初现有工资的 ${Math.round(CAP_RATCHET*100)}% 核定，每季收紧一次，直到落回目标线。`:""}
     ${overCap?`<br><span style="color:#e5484d">目前已超出上限 ${money(cn-cap)}/年。本季到期合同可释放 ${money(expiringWages(c))}/年。</span>`:""}</div>`;
   v.appendChild(bc);
 
@@ -7975,7 +7988,10 @@ function idbGet(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
   q.onsuccess=()=>{db.close();res(q.result);}; q.onerror=()=>{db.close();rej(q.error);}; })); }
 function idbDel(k){ return idbOpen().then(db=>new Promise((res,rej)=>{
   const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).delete(k);
-  tx.oncomplete=()=>{db.close();res(true);}; tx.onerror=()=>{db.close();rej(tx.error);}; })); }
+  tx.oncomplete=()=>{db.close();res(true);}; tx.onerror=()=>{db.close();rej(tx.error);}; tx.onabort=()=>{db.close();rej(tx.error||new Error("abort"));}; })); }
+function idbKeys(){ return idbOpen().then(db=>new Promise((res,rej)=>{
+  const q=db.transaction(DB_STORE,"readonly").objectStore(DB_STORE).getAllKeys();
+  q.onsuccess=()=>{db.close();res(q.result);}; q.onerror=()=>{db.close();rej(q.error);}; })); }
 /* ---------- Cache Storage 层（无 5MB 上限，鸿蒙上通常比 IndexedDB 稳）---------- */
 function cacheOK(){ return typeof caches!=="undefined" && window.isSecureContext!==false; }
 async function cacheSet(k,v){ if(!cacheOK()) throw new Error("no-cache");
@@ -7984,6 +8000,10 @@ async function cacheGet(k){ if(!cacheOK()) throw new Error("no-cache");
   const c=await caches.open(CACHE_NS); const r=await c.match(CACHE_BASE+k); return r? await r.text() : null; }
 async function cacheDel(k){ if(!cacheOK()) return;
   const c=await caches.open(CACHE_NS); await c.delete(CACHE_BASE+k); }
+async function cacheSaveKeys(){
+  const c=await caches.open(CACHE_NS), base=new URL(CACHE_BASE,location.href).href;
+  return (await c.keys()).map(r=>r.url).filter(url=>url.startsWith(base)).map(url=>url.slice(base.length));
+}
 /* ---------- 压缩：几 MB 的存档一般压到几百 KB ----------
    老内核（Chrome 80~102，如百度 App、部分国产浏览器）有 CompressionStream 但不认 "deflate-raw"，
    构造时直接抛错——原来只判断有没有这个类，结果每次存档都在压缩这步失败、三层一层都没写。
@@ -8038,13 +8058,19 @@ async function readFP(){
 /* ---------- 统一读写 ----------
    三层每次都写，不是「谁失败才轮到谁」。压缩后存档不到 1MB，localStorage 装得下，
    而它恰恰是这类浏览器最不爱清的一层——Cache Storage 名字里带 cache，清理缓存时第一个遭殃。 */
-let META_CACHE=null, SAVE_QUEUE=Promise.resolve(), SAVE_EPOCH=0, SAVE_STAMP=0, SAVE_ENABLED=true;
+let META_CACHE=null, SAVE_QUEUE=Promise.resolve(), SAVE_EPOCH=0, SAVE_STAMP=0, SAVE_ENABLED=true, SAVE_DELETING=false;
 function queueSave(fn){ const task=SAVE_QUEUE.then(fn); SAVE_QUEUE=task.catch(()=>{}); return task; }
 async function writeSaveLayers(payload,meta,epoch){
-  const tiers=[], mj=JSON.stringify(meta); let lastErr=null;
+  const tiers=[], mj=JSON.stringify(meta), embedded=payload.startsWith("S1:"); let lastErr=null;
   for(const [name,set] of [["IndexedDB",idbSet],["localStorage",async(k,v)=>localStorage.setItem(k,v)],["Cache",cacheSet]]){
     if(epoch!==SAVE_EPOCH || !SAVE_ENABLED) return "已取消";
-    try{ await set(SAVEKEY,payload); await set(METAKEY,mj); tiers.push(name); }catch(e){lastErr=e;}
+    try{
+      await set(SAVEKEY,payload);
+      // S1 正文已带经过校验的索引，单独索引写失败时仍可正常读档。
+      if(embedded)tiers.push(name);
+      await set(METAKEY,mj);
+      if(!embedded)tiers.push(name);
+    }catch(e){lastErr=e;}
   }
   if(!tiers.length) throw new Error("三层存储全部写入失败"+(lastErr?.message?"："+lastErr.message:""));
   if(epoch!==SAVE_EPOCH || !SAVE_ENABLED) return "已取消";
@@ -8101,22 +8127,49 @@ function healSave(){
 }
 async function readSave(){ const best=await newestSave(); return best?.body||null; }
 async function readMeta(){ const best=await newestSave(); return best?.meta||null; }
+async function clearSaveLayer(name,list,read,remove,scoped){
+  const keys=new Set([SAVEKEY,METAKEY,FPKEY]);
+  let incomplete=false;
+  try{
+    for(const key of await list()){
+      if(typeof key!=="string")continue;
+      if(key.startsWith(CHEAT_BACKUP_PREFIX)){ keys.add(key); continue; }
+      if(!key.startsWith(LEGACY_CHEAT_BACKUP_PREFIX))continue;
+      // 旧前缀与同域的《执掌绿茵》共用。共享存储层只清理本作的记录格式。
+      try{ if(scoped||isLegacyCheatBackup(await read(key)))keys.add(key); }
+      catch(e){ incomplete=true; }
+    }
+  }catch(e){ incomplete=true; }
+  const results=await Promise.allSettled([...keys].map(async key=>remove(key)));
+  return incomplete||results.some(r=>r.status==="rejected")?name:null;
+}
 async function deleteSave(){
+  SAVE_DELETING=true;
   SAVE_ENABLED=false; SAVE_EPOCH++; clearTimeout(SAVE_TIMER); SAVE_TIMER=null; SAVE_DIRTY=false;
-  // 排空在途写入后再删除，防止手动保存或自愈将正文重新写回。
-  await SAVE_QUEUE;
-  for(const k of [SAVEKEY,METAKEY,FPKEY]){
-    try{ await idbDel(k); }catch(e){}
-    try{ await cacheDel(k); }catch(e){}
-    try{ localStorage.removeItem(k); }catch(e){}
+  try{
+    // 排空普通存档和作弊备份的在途写入。
+    await SAVE_QUEUE;
+    const layers=[
+      clearSaveLayer("本地存储",()=>Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)),
+        key=>localStorage.getItem(key),key=>localStorage.removeItem(key))
+    ];
+    if(window.indexedDB)layers.push(clearSaveLayer("IndexedDB",idbKeys,idbGet,idbDel));
+    if(cacheOK())layers.push(clearSaveLayer("Cache Storage",cacheSaveKeys,cacheGet,cacheDel,true));
+    META_CACHE=null; STORE_TIER=""; SAVE_FAILS=0; SAVE_ERR=""; LAST_SAVE_AT=null;
+    return (await Promise.all(layers)).filter(Boolean);
+  }finally{
+    SAVE_DELETING=false;
   }
-  META_CACHE=null; STORE_TIER=""; SAVE_FAILS=0; SAVE_ERR=""; LAST_SAVE_AT=null;
 }
 // 载入存档对象并校验版本
 function adoptWorld(obj){
+  if(CHEAT_PENDING||SAVE_DELETING)throw new Error("savebusy");
   if(!obj || !obj.clubs || !obj.leagues) throw new Error("bad");
   if(obj.ver!==2 || !obj.cups) throw new Error("oldver");
   SAVE_ENABLED=true; WORLD=obj; CURMATCH=null; VIEW="home"; LGNATION=null;
+  normalizeLoadedWorld();
+}
+function normalizeLoadedWorld(){
   // 老存档没有 ca0（成长曲线基准），按当前能力回填
   Object.values(WORLD.players||{}).forEach(p=>{ if(p && p.ca0==null) p.ca0=p.ca; if(p) profOf(p); });   // 职业素养（2026-09-30 新增）
   ensureAllNumbers();                        // 老存档没有球衣号码
@@ -8181,7 +8234,10 @@ function migrateWorld(){
   (WORLD.freeAgents||[]).forEach(id=>{ const p=P(id); if(p) p.wage=marketWage(p); });
   WORLD.wageFix2 = 1;
 }
-function loadErrMsg(e){ return (e&&e.message==="oldver")? "这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏" : "存档无法读取"; }
+function loadErrMsg(e){
+  if(e?.message==="savebusy")return "请等当前存档操作完成后重试";
+  return e?.message==="oldver"?"这是旧版（仅英格兰）的存档，与五大联赛版不兼容，请开始新游戏":"存档无法读取";
+}
 
 
 /* ---------- 存储自检：丢档时用它定位到底哪一层挂了 ---------- */
@@ -8243,6 +8299,353 @@ async function storageSelfTest(onStep){
   return R;
 }
 
+const CHEAT_MAX_MONEY=1000000000;
+const CHEAT_BACKUP_PREFIX="fmweb_football_manager_cheat_backup_";
+const LEGACY_CHEAT_BACKUP_PREFIX="fmweb_cheat_backup_";
+let CHEAT_PENDING=false, CHEAT_QUERY="";
+function cheatsEnabled(){ return WORLD?.cheats?.enabled===true; }
+function cheatWageRelaxed(c){
+  return cheatsEnabled()&&WORLD.cheats.relaxWages===true&&c.id===WORLD.userClub;
+}
+function cheatAvailable(){
+  if(!WORLD||!SAVE_ENABLED||CHEAT_PENDING||SAVE_DELETING)return false;
+  if(BUSY||CURMATCH){
+    toast("请先完成比赛结算，再使用作弊台","bad");
+    return false;
+  }
+  return true;
+}
+function cheatBackupKey(id,prefix=CHEAT_BACKUP_PREFIX){
+  return typeof id==="string"&&/^[a-z0-9]+-[a-z0-9]+$/.test(id)?prefix+id:null;
+}
+function isLegacyCheatBackup(copy){
+  return typeof copy==="string"&&/^\d+\nZ[0-3]:/.test(copy);
+}
+async function readCheatBackups(id){
+  const key=cheatBackupKey(id);
+  if(!key)return [];
+  const legacyKey=cheatBackupKey(id,LEGACY_CHEAT_BACKUP_PREFIX);
+  const copies=await Promise.all([idbGet,cacheGet,async k=>localStorage.getItem(k)].flatMap(read=>[
+    within(read(key),4000).then(r=>r?.v),
+    within(read(legacyKey),4000).then(r=>isLegacyCheatBackup(r?.v)?r.v:null)
+  ]));
+  return [...new Set(copies.filter(v=>typeof v==="string"&&v))];
+}
+function checkedCheatBackup(copy){
+  const end=copy.indexOf("\n");
+  const packed=end<0?"":copy.slice(end+1);
+  return packed&&copy.slice(0,end)===String(hashStr(packed))?packed:null;
+}
+async function findCheatBackup(id){
+  for(const copy of await readCheatBackups(id)){
+    const packed=checkedCheatBackup(copy);
+    if(!packed)continue;
+    try{
+      const data=JSON.parse(await unzipSave(packed)), saved=data.world;
+      if(saved?.ver===2&&Array.isArray(saved.clubs)&&saved.clubs[saved.userClub]&&Array.isArray(saved.leagues)
+          &&saved.players&&saved.cups&&[data.rng,data.pid,data.fin].every(Number.isSafeInteger))return data;
+    }catch(e){ /* 继续检查其他副本 */ }
+  }
+  return null;
+}
+async function createCheatBackup(world,verify){
+  const previous=world.cheats.backup, copies=await readCheatBackups(previous);
+  if(copies.some(checkedCheatBackup))return previous;
+  if(copies.length)throw new Error("现有备份已损坏");
+  toast("正在保存作弊前的进度…");
+  const id=Date.now().toString(36)+"-"+Math.floor(Math.random()*2**32).toString(36);
+  const key=cheatBackupKey(id);
+  const body=JSON.stringify({world:{...world,cheats:undefined},rng:RNGSTATE,pid:PID,fin:FIN_CLK});
+  const packed=await zipSave(body), copy=hashStr(packed)+"\n"+packed;
+  await queueSave(async()=>{
+    verify();
+    const writes=await Promise.allSettled([idbSet(key,copy),cacheSet(key,copy),
+      Promise.resolve().then(()=>localStorage.setItem(key,copy))]);
+    if(!writes.some(r=>r.status==="fulfilled"))throw new Error("浏览器无法写入备份");
+  });
+  return id;
+}
+async function runCheatTask(work){
+  if(!cheatAvailable())return false;
+  const world=WORLD, epoch=SAVE_EPOCH, app=$("#app"), modal=$("#modal");
+  const nodes=[app,modal].filter(Boolean), inert=nodes.map(node=>node.inert);
+  const verify=()=>{
+    if(WORLD!==world||SAVE_EPOCH!==epoch||!SAVE_ENABLED)throw new Error("当前进度已改变，请重试");
+  };
+  CHEAT_PENDING=true;
+  nodes.forEach(node=>{node.inert=true;});
+  try{
+    verify();
+    await work(world,verify);
+    return true;
+  }catch(e){
+    toast("作弊台操作未完成："+e.message,"bad");
+    return false;
+  }finally{
+    nodes.forEach((node,i)=>{node.inert=inert[i];});
+    CHEAT_PENDING=false;
+    if(SAVE_DIRTY)markDirty();
+  }
+}
+async function applyCheat(change,message){
+  if(!cheatsEnabled())return false;
+  const ok=await runCheatTask(async(world,verify)=>{
+    const backup=await createCheatBackup(world,verify);
+    verify();
+    if(change()===false)throw new Error("操作未生效，请重新选择");
+    world.cheats.backup=backup;
+  });
+  if(!ok)return false;
+  closeModal();
+  render();
+  toast(message);
+  return true;
+}
+function confirmCheatRestore(){
+  if(!cheatAvailable())return;
+  openModal("恢复作弊前备份",
+    "<p>将回到第一次使用作弊台修改前的进度。之后的比赛、转会和其他改动都会回退，作弊台也会关闭。</p>",
+    '<button class="danger" onclick="restoreCheatBackup()">确认恢复</button><button onclick="closeModal()">取消</button>');
+}
+function prepareCheatRestore(record){
+  const current=[WORLD,RNGSTATE,PID,FIN_CLK,REV_R,REV_S];
+  try{
+    WORLD=record.world; RNGSTATE=record.rng; PID=record.pid; FIN_CLK=record.fin;
+    REV_R={key:""}; REV_S={key:""};
+    normalizeLoadedWorld();
+    return {rng:RNGSTATE,pid:PID,fin:FIN_CLK};
+  }finally{
+    [WORLD,RNGSTATE,PID,FIN_CLK,REV_R,REV_S]=current;
+  }
+}
+async function restoreCheatBackup(){
+  const ok=await runCheatTask(async(world,verify)=>{
+    const id=world.cheats?.backup;
+    const record=await findCheatBackup(id);
+    if(!record)throw new Error("当前浏览器找不到可读取的作弊前备份");
+    verify();
+    const runtime=prepareCheatRestore(record);
+    const saved=record.world;
+    saved.cheats={enabled:false,backup:id};
+    const tier=await storeSave(JSON.stringify(saved),{club:saved.clubs[saved.userClub].cn,season:saved.season,day:saved.day});
+    verify();
+    if(tier==="已取消")throw new Error("备份没有写入当前存档");
+    WORLD=saved; CURMATCH=null; LGNATION=null;
+    RNGSTATE=runtime.rng; PID=runtime.pid; FIN_CLK=runtime.fin;
+    REV_R={key:""}; REV_S={key:""};
+    clearTimeout(SAVE_TIMER);
+    SAVE_DIRTY=false; SAVE_FAILS=0; SAVE_ERR=""; LAST_SAVE_AT=new Date();
+    CHEAT_QUERY="";
+  });
+  if(!ok)return false;
+  closeModal();
+  VIEW="cheats";
+  render(false);
+  toast("已恢复作弊前的进度");
+  return true;
+}
+function cheatInteger(id,min,max){
+  const value=$("#"+id)?.valueAsNumber;
+  return Number.isInteger(value)&&value>=min&&value<=max?value:null;
+}
+function cheatMoneyInput(id){
+  const value=cheatInteger(id,0,toCurIn(CHEAT_MAX_MONEY));
+  return value===null?null:Math.round(fromCur(value));
+}
+function setCheatsEnabled(enabled){
+  if(!cheatAvailable())return;
+  WORLD.cheats={...WORLD.cheats,enabled,relaxWages:false};
+  CHEAT_QUERY="";
+  render();
+}
+function submitCheatInjection(){
+  const c=UC(), amount=cheatMoneyInput("cheat-cash");
+  if(!amount||![c.finance.balance+amount,c.finance.income+amount].every(n=>Math.abs(n)<=Number.MAX_SAFE_INTEGER)){
+    toast("请输入有效的正整数金额","bad");
+    return;
+  }
+  return applyCheat(()=>addMoney(c,amount,"作弊台注资"),`${c.cn} 已收到 ${money(amount)} 注资`);
+}
+function vCheats(v){
+  const c=UC(), enabled=cheatsEnabled(), relaxed=cheatWageRelaxed(c);
+  const backupId=WORLD.cheats?.backup;
+  v.appendChild(el("div","",`<h1>作弊台</h1><div class="sub">${esc(c.cn)} · ${enabled?"本档已开启":"本档已关闭"}</div>`));
+  const controls=el("section","card",`
+    <div class="hint">第一次修改前，游戏会在当前浏览器保留一份备份。${enabled?"关闭作弊台会恢复工资上限，已完成的注资、转会和球员编辑仍有效。":""}</div>
+    ${backupId?'<div class="hint" id="cheat-backup-status" aria-live="polite">正在检查此浏览器的备份…</div>':""}
+    <div class="cheat-actions">
+      <button class="${enabled?"":"pri"}" onclick="setCheatsEnabled(${!enabled})">${enabled?"关闭作弊台":"为此存档开启作弊台"}</button>
+      <button onclick="go('save')">返回存档</button>
+    </div>`);
+  v.appendChild(controls);
+  if(backupId){
+    const status=controls.querySelector("#cheat-backup-status");
+    findCheatBackup(backupId).then(record=>{
+      if(!controls.isConnected)return;
+      if(!record){
+        status.textContent="此浏览器没有可恢复的备份。备份保存在创建它的浏览器中。";
+        return;
+      }
+      status.textContent="";
+      const restore=el("button","","恢复作弊前备份");
+      restore.onclick=confirmCheatRestore;
+      const actions=controls.querySelector(".cheat-actions");
+      actions.insertBefore(restore,actions.lastElementChild);
+    });
+  }
+  if(!enabled)return;
+  const max=toCurIn(CHEAT_MAX_MONEY);
+  const finance=el("section","card",`
+    <h3>俱乐部注资</h3><div class="hint">银行余额 ${money(c.finance.balance)} · 可用资金 ${money(avail(c))}</div>
+    <form id="cheat-inject">
+      <div class="cheat-fields"><label for="cheat-cash">注资金额（${CURSYM()}）<input id="cheat-cash" type="number" inputmode="numeric" min="1" max="${max}" required></label></div>
+      <button type="submit">确认注资</button>
+    </form>
+    <div class="hr"></div>
+    <h3>下季工资上限</h3><div class="hint">${relaxed?"已放宽":"董事会上限 "+money(wageCap(c))} · 本季工资仍占用可用资金。</div>
+    <div class="cheat-actions"><button id="cheat-wages">${relaxed?"恢复工资上限":"放宽工资上限"}</button></div>`);
+  v.appendChild(finance);
+  finance.querySelector("#cheat-inject").onsubmit=e=>{e.preventDefault();submitCheatInjection();};
+  finance.querySelector("#cheat-wages").onclick=()=>{
+    if(!relaxed)return applyCheat(()=>{WORLD.cheats.relaxWages=true;},"已放宽下季工资上限");
+    if(!cheatAvailable())return;
+    WORLD.cheats.relaxWages=false;
+    render();
+    toast("已恢复下季工资上限");
+  };
+  const players=el("section","card",`
+    <h3>编辑球员与指定转会费</h3>
+    <div class="cheat-fields"><label for="cheat-search">搜索球员<input id="cheat-search" type="text" placeholder="中文名或英文名"></label></div>
+    <div class="hint" id="cheat-result-info" aria-live="polite"></div><div class="cheat-results"></div>`);
+  v.appendChild(players);
+  const search=players.querySelector("#cheat-search"), results=players.querySelector(".cheat-results"), info=players.querySelector("#cheat-result-info");
+  search.value=CHEAT_QUERY;
+  const update=()=>{
+    CHEAT_QUERY=search.value;
+    const query=CHEAT_QUERY.trim().toLowerCase();
+    const pool=query?Object.values(WORLD.players).filter(p=>p&&!p.retired&&[p.cn,p.name].some(n=>n?.toLowerCase().includes(query)))
+      :[...c.squad,...(c.loanedOut||[])].map(P).filter(p=>p&&!p.retired);
+    info.textContent=query?(pool.length>30?`共 ${pool.length} 人，显示前 30 人`:`找到 ${pool.length} 名球员`):"本队一线队与外租球员";
+    results.replaceChildren();
+    for(const p of (query?pool.slice(0,30):pool)){
+      const team=C(p.clubId)?.cn||"自由球员";
+      const b=el("button","cheat-player",`<strong>${esc(p.cn)}</strong><small>${esc(team)} · ${POS_CN[p.pos]} · 能力 ${ovr(p)}</small>`);
+      b.onclick=()=>cheatPlayerDialog(p.id);
+      results.appendChild(b);
+    }
+  };
+  search.oninput=update;
+  update();
+}
+function cheatTransferBlock(p,c){
+  const seller=p&&C(p.clubId);
+  if(!p||p.retired||!seller||seller.id===c.id||!seller.squad.includes(p.id))return "请选择其他俱乐部的一线队球员";
+  if(!inTransferWindow())return "当前转会窗已关闭";
+  if(reservedSquadSize(c)>=30)return "阵容已满（上限 30 人）";
+  return saleTerms(seller,p).blocked||"";
+}
+function cheatPlayerDialog(pid){
+  if(!cheatsEnabled()||!cheatAvailable())return;
+  const p=P(pid), c=UC();
+  if(!p||p.retired)return;
+  const contract=ownerOf(p)>=0&&!p.precontract, years=Math.max(0,p.contract-WORLD.season);
+  const transfer=p.clubId>=0&&ownerOf(p)!==c.id;
+  const blocked=transfer?cheatTransferBlock(p,c):"";
+  openModal("编辑球员 · "+esc(p.cn),`
+    <div class="hint">${esc(C(p.clubId)?.cn||"自由球员")} · ${POS_CN[p.pos]} · ${p.age} 岁</div>
+    <form id="cheat-player-form">
+      <div class="cheat-fields">
+        <label for="cheat-ca">当前能力<input id="cheat-ca" type="number" inputmode="numeric" min="5" max="100" value="${ovr(p)}" required></label>
+        <label for="cheat-pa">潜力<input id="cheat-pa" type="number" inputmode="numeric" min="5" max="100" value="${Math.min(100,Math.round(p.pa/2))}" required></label>
+        ${contract?`<label for="cheat-contract">剩余合同年限<input id="cheat-contract" type="number" inputmode="numeric" min="0" max="${Math.max(6,years)}" value="${years}" required></label>`:""}
+      </div>
+    </form>
+    <div class="hint">${contract?"合同填 0 表示本赛季末到期。":p.precontract?"该球员的预签合同已锁定。":"自由球员暂无合同。"}${blocked?"<br>"+esc(blocked):""}</div>`,`
+    <button class="pri" type="submit" form="cheat-player-form">保存球员改动</button>
+    ${transfer&&!blocked?`<button onclick="cheatTransferDialog(${pid})">指定转会费</button>`:""}
+    <button onclick="closeModal()">取消</button>`);
+  $("#cheat-player-form").onsubmit=e=>{e.preventDefault();submitCheatPlayer(pid);};
+}
+function cheatPlayerAttrs(p,target){
+  const a={...p.a}, weights=POS_WEIGHTS[p.pos];
+  const keys=ATTR_KEYS.filter(k=>k in weights||!(k in ATTRS_GK));
+  let ca=calcCA(a,p.pos);
+  const dir=Math.sign(target-ca);
+  // 每轮给各项属性调整一格，保留球员原有的属性差异。
+  for(let round=0;round<19&&ca!==target;round++){
+    for(const key of keys){
+      const before=a[key];
+      a[key]=clamp(before+dir,1,20);
+      const next=calcCA(a,p.pos);
+      if(next===target)return a;
+      if(dir*(next-target)>0){
+        if(dir<0&&Math.round(next/2)===Math.round(target/2))return a;
+        a[key]=before;
+      }else ca=next;
+    }
+  }
+  return a;
+}
+function submitCheatPlayer(pid){
+  if(!cheatsEnabled()||!cheatAvailable())return;
+  const p=P(pid);
+  if(!p||p.retired)return;
+  const target=cheatInteger("cheat-ca",5,100), potential=cheatInteger("cheat-pa",5,100);
+  const canEditContract=ownerOf(p)>=0&&!p.precontract, currentYears=Math.max(0,p.contract-WORLD.season);
+  const years=canEditContract?cheatInteger("cheat-contract",0,Math.max(6,currentYears)):currentYears;
+  if(target===null||potential===null||years===null){toast("请填写有效的能力、潜力和合同年限","bad");return;}
+  const changeCA=target!==ovr(p), changePA=potential!==Math.round(p.pa/2);
+  if((changeCA||changePA)&&target>potential){toast("潜力必须达到当前能力","bad");return;}
+  const pa=changePA?potential*2:p.pa;
+  const a=changeCA?cheatPlayerAttrs(p,Math.min(target*2,pa)):p.a;
+  const ca=changeCA?calcCA(a,p.pos):p.ca;
+  const contract=years!==currentYears?WORLD.season+years:p.contract;
+  if(changeCA&&(Math.round(ca/2)!==target||ca>pa)){toast("无法将球员能力调到指定值","bad");return;}
+  if(!changeCA&&!changePA&&contract===p.contract){toast("球员资料没有改动","warn");return;}
+  return applyCheat(()=>{
+    if(changeCA||changePA)p.ca0=clamp((p.ca0??p.ca)+ca-p.ca,10,pa);
+    Object.assign(p,{a,ca,pa,contract});
+    p.value=calcValue(p);
+    if(changeCA&&p.clubId<0)p.wage=marketWage(p);
+  },`${p.cn} 的资料已更新`);
+}
+function cheatTransferDialog(pid){
+  if(!cheatsEnabled()||!cheatAvailable())return;
+  const c=UC(), p=P(pid), blocked=cheatTransferBlock(p,c);
+  if(blocked){toast(blocked,"bad");return;}
+  const max=toCurIn(CHEAT_MAX_MONEY);
+  openModal("指定转会费 · "+esc(p.cn),`
+    <div class="hint">${esc(C(p.clubId).cn)} → ${esc(c.cn)} · 市场要价 ${money(askingPrice(p))} · 可用资金 ${money(avail(c))}</div>
+    <form id="cheat-transfer-form">
+      <div class="cheat-fields">
+        <label for="cheat-fee">成交价（${CURSYM()}）<input id="cheat-fee" type="number" inputmode="numeric" min="0" max="${max}" placeholder="填 0 免费引进" required></label>
+        <label for="cheat-wage">周薪（${CURSYM()}）<input id="cheat-wage" type="number" inputmode="numeric" min="1" max="${max}" value="${toCurIn(wageDemand(p,c))}" required></label>
+        <label for="cheat-years">合同年限<input id="cheat-years" type="number" inputmode="numeric" min="2" max="5" value="3" required></label>
+      </div>
+    </form>
+    <div class="hint">确认后球员立即加盟，转会费一次付清，本季工资照常占用可用资金。</div>`,
+    '<button class="pri" type="submit" form="cheat-transfer-form">确认成交</button><button onclick="closeModal()">取消</button>');
+  $("#cheat-transfer-form").onsubmit=e=>{e.preventDefault();submitCheatTransfer(pid);};
+}
+function submitCheatTransfer(pid){
+  if(!cheatsEnabled()||!cheatAvailable())return;
+  const c=UC(), p=P(pid), blocked=cheatTransferBlock(p,c);
+  if(blocked){toast(blocked,"bad");return;}
+  const fee=cheatMoneyInput("cheat-fee"), wage=cheatMoneyInput("cheat-wage"), years=cheatInteger("cheat-years",2,5);
+  if(fee===null||!wage||years===null){toast("请填写有效的转会费、周薪和合同年限","bad");return;}
+  const need=wageDemand(p,c);
+  if(wage<need*0.92){toast(`${p.cn} 要求约 ${money(need)} 的周薪`,"bad");return;}
+  const check=canAfford(c,fee,wage*52);
+  if(!check.ok){toast(affordMsg(c,check,fee,wage*52),"bad");return;}
+  const seller=C(p.clubId);
+  return applyCheat(()=>{
+    if(!transferPlayer(pid,c.id,fee,wage,years))return false;
+    WORLD.offers=(WORLD.offers||[]).filter(o=>o.pid!==pid);
+    WORLD.interest=interestList().filter(o=>o.pid!==pid);
+    news(`签下 ${p.cn}`,`${c.cn} 通过作弊台以 ${money(fee)} 从 ${seller.cn} 引进 ${p.cn}。`,"good");
+  },`签约成功：${p.cn} · ${money(fee)}`);
+}
+
 function vSave(v){
   v.appendChild(el("div","",`<h1>存档</h1><div class="sub">进度会在每次操作后自动保存到本浏览器（IndexedDB / Cache / localStorage 三层兜底）；也可以导出为文件长期保留或换设备继续</div>`));
   { const cc=el("div","card"); cc.innerHTML=`<h3>显示货币 <span class="hint" style="font-weight:400">只改显示，游戏内部一律按英镑记账；设置保存在本机</span></h3>`;
@@ -8258,16 +8661,29 @@ function vSave(v){
       <div class="hint">${esc(SAVE_ERR||"浏览器存储不可用")}<br>当前进度<b>不会</b>被保留。请立刻点下面的「导出存档文件」，再到本页底部运行「存储自检」看是哪一层挂了。</div>`;
     v.appendChild(w);
   }
+  v.appendChild(el("section","card",`<h3>作弊台</h3><div class="hint">${cheatsEnabled()?"本档已开启":"本档已关闭"} · 注资、指定转会费和编辑球员</div><div class="cheat-actions"><button onclick="go('cheats')">打开作弊台</button></div>`));
   const g=el("div","grid2");
-  const a=el("div","card"); a.innerHTML=`<h3>浏览器存档 <span class="tag t-ok">自动保存已开启</span></h3><div class="hint" id="save-status" style="margin-bottom:8px">${saveStatusText()}</div>`;
+  const a=el("div","card"); a.innerHTML=`<h3>浏览器存档 <span class="tag ${SAVE_ENABLED?"t-ok":"t-w"}">自动保存已${SAVE_ENABLED?"开启":"暂停"}</span></h3><div class="hint" id="save-status" style="margin-bottom:8px">${saveStatusText()}</div>`;
   let info='<div class="hint">暂无存档</div>';
   { const m=saveMeta();
     if(m) info=`<div class="hint">${esc(m.club)} · ${m.season||"?"} 赛季 · 第 ${m.day} 天<br>存档大小 ${m.mb} MB${m.auto?" · 自动保存":""}</div>`; }
   a.appendChild(el("div","",info));
-  const b1=el("button","pri","保存进度"); b1.onclick=()=>saveGame();
+  const b1=el("button","pri","保存进度"); b1.disabled=!SAVE_ENABLED; b1.onclick=()=>saveGame();
   const b2=el("button","","读取存档"); b2.style.marginLeft="8px"; b2.onclick=()=>loadGame();
   const b3=el("button","danger","删除存档"); b3.style.marginLeft="8px";
-  b3.onclick=()=>{ if(confirm("确定删除浏览器存档？")){ deleteSave().then(()=>{WORLD=null;CURMATCH=null;document.getElementById("app").style.display="none";document.getElementById("loadscr").style.display="flex";startMenu();}); } };
+  b3.onclick=async()=>{
+    if(CHEAT_PENDING||SAVE_DELETING||!confirm("确定删除浏览器存档和本游戏的作弊前备份？"))return;
+    const failed=await deleteSave();
+    if(failed.length){
+      toast("以下存储未能清理完毕，可重试："+failed.join("、"),"bad");
+      render(false);
+      return;
+    }
+    WORLD=null; CURMATCH=null;
+    $("#app").style.display="none"; $("#loadscr").style.display="flex";
+    startMenu();
+    toast("已删除浏览器存档和作弊前备份");
+  };
   a.appendChild(el("div","hr")); a.appendChild(b1); a.appendChild(b2); a.appendChild(b3);
   g.appendChild(a);
 
@@ -8418,7 +8834,7 @@ function markDirty(){
   clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,1500);
 }
 function flushAutosave(force){
-  if(!SAVE_ENABLED||!SAVE_DIRTY||!WORLD||!WORLD.clubs) return;
+  if(CHEAT_PENDING||!SAVE_ENABLED||!SAVE_DIRTY||!WORLD||!WORLD.clubs) return;
   if(CURMATCH && !CURMATCH.done && !force){ clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,3000); return; }
   if(SAVE_INFLIGHT && !force){ clearTimeout(SAVE_TIMER); SAVE_TIMER=setTimeout(flushAutosave,1000); return; }
   SAVE_DIRTY=false; SAVE_INFLIGHT=true;
@@ -8662,7 +9078,7 @@ function showSeasonEnd(){
 /* ---------- 继续按钮 ---------- */
 let BUSY=false;
 function onContinue(){
-  if(BUSY) return;
+  if(BUSY||CHEAT_PENDING||SAVE_DELETING) return;
   if(WORLD.gameOver){ openModal("下课",`<div>${esc(WORLD.gameOver)}</div>`,
      `<button class="pri" onclick="closeModal();newGameScreen()">重新开始</button>`); return; }
   // 有未结算的用户比赛：未打完 → 回到比赛页；已打完 → 直接结算，否则会卡住
