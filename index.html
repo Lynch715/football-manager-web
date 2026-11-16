@@ -508,12 +508,13 @@ const NATIONS=[
 ];
 const EURO_NATION=NATIONS.length;   // 「欧洲其他」伪国家编号
 const EURO_COMPS={
-  CL:{code:"CL",name:"欧洲冠军联赛",short:"欧冠",others:13,
+  CL:{code:"CL",name:"欧洲冠军联赛",short:"欧冠",others:13,championRep:8,
       prize:{enter:15e6,win:2.1e6,draw:0.7e6,r16:9.6e6,qf:10.6e6,sf:12.5e6,fin:15.5e6,champ:4.5e6}},
-  EL:{code:"EL",name:"欧罗巴联赛",short:"欧联",others:12,
+  EL:{code:"EL",name:"欧罗巴联赛",short:"欧联",others:12,championRep:4,
       prize:{enter:3.6e6,win:0.6e6,draw:0.2e6,r16:1.2e6,qf:1.8e6,sf:2.8e6,fin:4.6e6,champ:4e6}}
 };
-const CL_TITLE_REP_GAIN=8;
+const LOWER_LEAGUE_TITLE_REP=1;
+const PROMOTION_REP=4;
 const TRANSFER_TITLE_POINTS=new Map([
   [EURO_COMPS.CL.name,12],
   [EURO_COMPS.EL.name,7],
@@ -2099,9 +2100,10 @@ function advanceCupRound(cup){
     w.trophies.push(WORLD.season+" "+cup.name);
     addMoney(w, cupPrize(cup,5), cup.name+"冠军奖金");
     w.board.conf=clamp(w.board.conf+15,0,100);
+    const repGain=gainClubReputation(w,2);
     const ff=ms.find(f=>f.played && (f.home===w.id||f.away===w.id));
     const fl=ff? finalLine(ff)+"，" : "";
-    if(w.id===WORLD.userClub) news(`${cup.name}冠军！`,`${fl}${w.cn} 捧起了 ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季的${cup.name}！`,"good");
+    if(w.id===WORLD.userClub) news(`${cup.name}冠军！`,`${fl}${w.cn} 捧起了 ${WORLD.season}/${String(WORLD.season+1).slice(2)} 赛季的${cup.name}！${reputationGainText(w,repGain)}`,"good");
     else if(NATIONS[cup.nation] && UC().nation===cup.nation) news(`${cup.name}决赛`,`${fl}${w.cn} 夺得本赛季${cup.name}冠军。`,"info");
     return;
   }
@@ -2263,17 +2265,14 @@ function euroFinish(E, fx){
   const w=winnerOf(fx), l= w===fx.home? fx.away : fx.home;
   E.results.push({round:"决赛", ties:[{a:fx.home,b:fx.away,g1:[fx.hg,fx.ag],pens:fx.pens,winner:w,...extraTimeData(fx)}]});
   E.winner=w; E.stage="F";
-  const champion=C(w), runnerUp=C(l), pz=EURO_COMPS[E.code].prize;
+  const champion=C(w), runnerUp=C(l), {prize:pz,championRep}=EURO_COMPS[E.code];
   addMoney(champion, pz.fin+pz.champ, E.short+"冠军奖金"); addMoney(runnerUp, pz.fin, E.short+"亚军奖金");
   champion.trophies.push(WORLD.season+" "+E.name);
   champion.board.conf=clamp(champion.board.conf+(E.code==="CL"?40:25),0,100);
-  const oldRep=champion.rep;
-  if(E.code==="CL") champion.rep=Math.min(100, oldRep+CL_TITLE_REP_GAIN);
-  const repGain=champion.rep-oldRep;
+  const repGain=gainClubReputation(champion,championRep);
   champion.euro=null; runnerUp.euro=null;
   if(w===WORLD.userClub){
-    const repNews=repGain>0?`俱乐部声望 +${repGain}，升至 ${champion.rep}/100。`:"";
-    news(`${E.name}冠军！！`,`${champion.cn} 登上欧洲之巅，捧起${E.name}奖杯！${repNews}`,"good");
+    news(`${E.name}冠军！！`,`${champion.cn} 登上欧洲之巅，捧起${E.name}奖杯！${reputationGainText(champion,repGain)}`,"good");
   }else news(`${E.name}决赛`,`${finalLine(fx)}，${champion.cn} 夺冠。`,"info");
 }
 // 决赛比分一律按「主队 比分 客队」写，点球同样按主客顺序（原来按冠军在前写，冠军是客队时比分就反了）
@@ -3114,6 +3113,14 @@ function runShootout(M){
 function news(title, body, cat){
   WORLD.inbox.unshift({d:WORLD.day, title, body, cat:cat||"info", read:false});
   if(WORLD.inbox.length>140) WORLD.inbox.length=140;
+}
+function gainClubReputation(club, points){
+  const before=club.rep;
+  club.rep=Math.min(100,before+points);
+  return club.rep-before;
+}
+function reputationGainText(club, gain){
+  return gain>0?`俱乐部声望 +${gain}，升至 ${club.rep}/100。`:"";
 }
 
 // ---------- 结果落地 ----------
@@ -4951,7 +4958,7 @@ function endSeason(){
         });
         if(PO.up16!=null && win===PO.up16) C(PO.up16).board.conf=clamp(C(PO.up16).board.conf+8,0,100);
       } else { throw new Error("附加赛尚未完成，不能结算升降级"); }
-      moves.push({nation:ni, tier, promoted, relegated, poWin:win});
+      moves.push({nation:ni, tier, promoted, relegated, poWin:win, lowerChampion:lower[0].id});
     }
   });
   summary.playoffs=(WORLD.playoffs||[]).map(p=>({nation:p.nation,tier:p.tier,name:p.name,winner:p.winner,up16:p.up16,skip:p.skip}));
@@ -4966,8 +4973,14 @@ function endSeason(){
         `${c.cn} 不幸降入 ${downName.name}。董事会对此深感失望，你的帅位岌岌可危。`,"bad"); });
   });
   // 夺冠加成
-  WORLD.leagues.forEach(lg=>{ const t=tables[lg.lg]; if(!t||!t.length) return;
-    C(t[0].id).board.conf=clamp(C(t[0].id).board.conf+30,0,100); });
+  WORLD.leagues.forEach(lg=>{
+    const t=tables[lg.lg]; if(!t||!t.length) return;
+    const champion=C(t[0].id);
+    champion.board.conf=clamp(champion.board.conf+30,0,100);
+    const repGain=gainClubReputation(champion,lg.tier===0?5:LOWER_LEAGUE_TITLE_REP);
+    if(champion.id===WORLD.userClub)
+      news(`${lg.name}冠军！`,`${champion.cn} 夺得${lg.name}冠军。${reputationGainText(champion,repGain)}`,"good");
+  });
   WORLD.history.push(summary);
 
   // 用户战报
@@ -4975,7 +4988,7 @@ function endSeason(){
   const myLg=WORLD.leagues[u.lastLg!=null?u.lastLg:u.lg];
   news(`${WORLD.season} 赛季结束`,
     `你带领 ${u.cn} 完成了 ${WORLD.season}/${(WORLD.season+1)%100} 赛季，${myLg?myLg.short:""}最终排名第 ${u.lastRank} 位。`+
-    (u.trophies.some(t=>t.startsWith(WORLD.season))?" 恭喜夺冠！":""),"info");
+    (u.trophies.some(t=>t.startsWith(WORLD.season+" ")&&!t.startsWith(WORLD.season+" 升入"))?" 恭喜夺冠！":""),"info");
 
   // 董事会评估
   const tenure = (WORLD.seasonsHere=(WORLD.seasonsHere||0)+1);
@@ -5105,7 +5118,7 @@ function endSeason(){
     if(c._promo){
       c.finance.grant += c._promo.bonus;
       if(c.id===WORLD.userClub)
-        news("升级后的董事会追加",`新联赛留守球队的阵容实力约 ${Math.round(c._promo.target/2)}，你的阵容目前 ${Math.round(squadStrength(c)/2)}。董事会在核定的 ${money(c.finance.alloc0)} 之外追加 ${money(c._promo.bonus)}，夏窗是补强的时候。`,"info");
+        news("升级后的董事会追加",`新联赛留守球队的阵容实力约 ${Math.round(c._promo.target/2)}，你的阵容目前 ${Math.round(squadStrength(c)/2)}。董事会在核定的 ${money(c.finance.alloc0)} 之外追加 ${money(c._promo.bonus)}，夏窗是补强的时候。${reputationGainText(c,c._promo.repGain)}`,"info");
       delete c._promo;
     }
   });
@@ -5127,9 +5140,11 @@ function bridgeTiers(moves){
     // 升班马
     mv.promoted.forEach(id=>{
       const c=C(id);
-      c.rep=clamp(c.rep+4,15,96);
+      // 次级联赛冠军已增加声望，同季两项奖励合计以普通升级的涨幅为上限。
+      const points=id===mv.lowerChampion?PROMOTION_REP-LOWER_LEAGUE_TITLE_REP:PROMOTION_REP;
+      const repGain=gainClubReputation(c,points);
       if(id===WORLD.userClub){
-        c._promo={bonus:Math.round(Math.pow(c.rep,3)*30/1e5)*1e5, target};   // 等 resetSeasonFinance 跑完再计入 grant
+        c._promo={bonus:Math.round(Math.pow(c.rep,3)*30/1e5)*1e5, target, repGain};   // 等 resetSeasonFinance 跑完再计入 grant
         return;
       }
       let added=0;
@@ -5149,7 +5164,7 @@ function bridgeTiers(moves){
     // 降班马先公开挂牌；玩家进入新赛季后才开始逐日处理转会。
     mv.relegated.forEach(id=>{
       const c=C(id);
-      c.rep=clamp(c.rep-3,15,96);
+      c.rep=Math.max(15,c.rep-3);
       if(id===WORLD.userClub) return;
       const stars=c.squad.map(P).filter(p=>!p.loan && p.ca>=ceiling && p.age<=31).sort((a,b)=>b.ca-a.ca).slice(0,3);
       stars.forEach(p=>{ p.listed=true; p.relegationSale={club:id, season:WORLD.season, aiFromDay:7}; });
@@ -8822,6 +8837,7 @@ function vHelp(v){
       另一道闸是<b>「下季工资承诺」</b>——下赛季仍在合同期的球员年薪合计，不能超过预计营收的 75%（顶级联赛）/ 85% / 90%。顶到上限就签不了抬高承诺的新约，只能原薪续约、等合同到期或卖人。租借下季不在，不占这个额度。
       董事会每周根据你与期望排名的差距调整信心，赛季末若长期远低于期望会被解雇。
       升级、夺冠会大幅提升信心，降级则相反。升降级按各国真实规则：下级联赛前 2 名直接升级，第三个名额由<b>附加赛</b>决出——英格兰、西班牙第 3–6 名，意大利第 3–8 名（第 3 名领先第 4 名 15 分以上时直接升级），这三国上级联赛 3 队直降；德国是德乙第 3 名对德甲第 16 名，法国是法乙第 3–5 名打完后挑战法甲第 16 名，这两国 2 队直降。附加赛在联赛结束后真打，赛事页有对阵。<br>
+      夺冠提升俱乐部声望（最高 100）：欧冠 +8、顶级联赛 +5、欧联 +4、国内杯赛 +2、次级联赛 +1。升级通常 +4，同季次级联赛夺冠并升级时两项合计最多 +4。<br>
       董事会的期望一半看声望、一半看你的<b>阵容实力</b>；赛事页积分榜的「阵容」列是阵容实力在本联赛的名次，和排名一比就知道谁在超额完成。<br>
       联赛转播分成一半按月到账、一半赛季末按名次结算，赛季中途余额为负很正常，别急着卖人。</div></div>
     <div class="card"><h3>杯赛与欧战</h3>
