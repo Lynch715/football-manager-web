@@ -513,6 +513,15 @@ const EURO_COMPS={
   EL:{code:"EL",name:"欧罗巴联赛",short:"欧联",others:12,
       prize:{enter:3.6e6,win:0.6e6,draw:0.2e6,r16:1.2e6,qf:1.8e6,sf:2.8e6,fin:4.6e6,champ:4e6}}
 };
+const CL_TITLE_REP_GAIN=8;
+const TRANSFER_TITLE_POINTS=new Map([
+  [EURO_COMPS.CL.name,12],
+  [EURO_COMPS.EL.name,7],
+  ...NATIONS.flatMap(nat=>[
+    [nat.cup,3],
+    ...nat.tiers.map((league,tier)=>[league.name,tier===0?5:1])
+  ])
+]);
 
 const CLUB_DATA_ENG = [
  // 英超
@@ -2254,13 +2263,18 @@ function euroFinish(E, fx){
   const w=winnerOf(fx), l= w===fx.home? fx.away : fx.home;
   E.results.push({round:"决赛", ties:[{a:fx.home,b:fx.away,g1:[fx.hg,fx.ag],pens:fx.pens,winner:w,...extraTimeData(fx)}]});
   E.winner=w; E.stage="F";
-  const pz=EURO_COMPS[E.code].prize;
-  addMoney(C(w), pz.fin+pz.champ, E.short+"冠军奖金"); addMoney(C(l), pz.fin, E.short+"亚军奖金");
-  C(w).trophies.push(WORLD.season+" "+E.name);
-  C(w).board.conf=clamp(C(w).board.conf+ (E.code==="CL"?40:25),0,100);
-  C(w).euro=null; C(l).euro=null;
-  if(w===WORLD.userClub) news(`${E.name}冠军！！`,`${C(w).cn} 登上欧洲之巅，捧起${E.name}奖杯！`,"good");
-  else news(`${E.name}决赛`,`${finalLine(fx)}，${C(w).cn} 夺冠。`,"info");
+  const champion=C(w), runnerUp=C(l), pz=EURO_COMPS[E.code].prize;
+  addMoney(champion, pz.fin+pz.champ, E.short+"冠军奖金"); addMoney(runnerUp, pz.fin, E.short+"亚军奖金");
+  champion.trophies.push(WORLD.season+" "+E.name);
+  champion.board.conf=clamp(champion.board.conf+(E.code==="CL"?40:25),0,100);
+  const oldRep=champion.rep;
+  if(E.code==="CL") champion.rep=Math.min(100, oldRep+CL_TITLE_REP_GAIN);
+  const repGain=champion.rep-oldRep;
+  champion.euro=null; runnerUp.euro=null;
+  if(w===WORLD.userClub){
+    const repNews=repGain>0?`俱乐部声望 +${repGain}，升至 ${champion.rep}/100。`:"";
+    news(`${E.name}冠军！！`,`${champion.cn} 登上欧洲之巅，捧起${E.name}奖杯！${repNews}`,"good");
+  }else news(`${E.name}决赛`,`${finalLine(fx)}，${champion.cn} 夺冠。`,"info");
 }
 // 决赛比分一律按「主队 比分 客队」写，点球同样按主客顺序（原来按冠军在前写，冠军是客队时比分就反了）
 function finalLine(fx){
@@ -6711,7 +6725,7 @@ function submitBid(pid){
     }
   }
   if(wg < need*0.92){ toast(`${p.cn} 认为薪资不足，要求 ${money(need)}/周`,"bad"); closeModal(); return; }
-  // 球员意愿：声望差
+  // 球员意愿：比较两队声望与近期冠军
   if(seller && !playerAcceptsMove(p,c,seller,wg,need)){ toast(`${p.cn} 不愿加盟——认为这是职业生涯的倒退`,"bad"); closeModal(); return; }
   if(pre){
     if(signPrecontract(p,c,wg,yr)){toast(`已预签 ${p.cn}，下赛季加盟`);closeModal();render();}
@@ -6735,14 +6749,27 @@ function submitBid(pid){
   news(`签下 ${p.cn}`,`${c.cn} ${isFA?"免签":"以 "+money(fee)} 从 ${seller?seller.cn:"自由市场"} 签下 ${p.cn}，签约 ${yr} 年，周薪 ${money(wg)}。`,"good");
   toast(`签约成功：${p.cn}`); closeModal(); render();
 }
-// 同一窗口、同一买卖双方的意愿固定；微调报价、换币种、读档和隔日重试不重抽。
-// 实质加薪会改善同一意愿判断，声望变化或下一转会窗也可改变结果。
+function recentTransferHonors(club){
+  let score=0;
+  for(const trophy of new Set(club.trophies||[])){
+    const match=/^(\d{4}) (.+)$/.exec(trophy);
+    if(!match) continue;
+    const age=WORLD.season-Number(match[1]);
+    if(age<0 || age>=3) continue;
+    const points=TRANSFER_TITLE_POINTS.get(match[2])||0;
+    score+=points*(3-age);
+  }
+  return Math.min(20, Math.round(score/3));
+}
+// 同一窗口使用同一个球员意愿值。荣誉、声望与实质加薪改变接受门槛。
 function playerAcceptsMove(p,c,seller,wage,need){
-  if(seller.rep<=c.rep+14) return true;
-  const key=[WORLD.seed,p.id,c.id,seller.id,winKey(),c.rep,seller.rep].join("|");
+  const honorEdge=recentTransferHonors(c)-recentTransferHonors(seller);
+  if(seller.rep-c.rep-honorEdge<=14) return true;
+  const key=[WORLD.seed,p.id,c.id,seller.id,winKey()].join("|");
   const roll=hashStr("move-willingness|"+key)/4294967296;
+  const reluctance=clamp(0.6-honorEdge*0.025,0.15,0.9);
   const bonus=Math.floor(Math.max(0,wage/Math.max(1,need)-1)*10+1e-8);
-  return roll>=Math.max(0.15,0.6-bonus*0.10);
+  return roll>=Math.max(0.15,reluctance-bonus*0.10);
 }
 function renewContract(pid){
   const p=P(pid), c=UC();
@@ -8776,7 +8803,8 @@ function vHelp(v){
       • 对手球员的属性默认不可见，加入<b>球探名单</b>后情报逐日积累，45% 可见属性和训练态度、95% 可见真实潜力<br>
       • 潜力是成长上限。出场时间、训练态度、教练和伤病影响兑现速度；普通球员 23 岁开放全部成长空间，23—27 岁仍可持续提升，28 岁起才逐步下调未兑现的潜力<br>
       • 新人只统计入队后的可出场机会；观察不足半年或有效机会不足 12 场，不做年度潜力升降评估<br>
-      • 报价需同时满足卖方价格、球员薪资要求与俱乐部声望；位置紧缺时可按报价框提示，以普通要价的 1.5–2 倍谈判，必要人数与位置覆盖不足时需等对方补员<br>
+      • 报价需满足卖方价格及球员的薪资要求和加盟意愿。球员会比较两队声望和近三个赛季的冠军，欧冠分量最重，越新的荣誉影响越大<br>
+      • 位置紧缺时可按报价框提示，以普通要价的 1.5–2 倍谈判，必要人数与位置覆盖不足时需等对方补员<br>
       • 降级核心先挂牌，夏窗前 7 天可先行考察和报价，8 月 8 日起 AI 参与竞争；在转会页点击「查看降级挂牌」寻找机会<br>
       • 外租归队后超过 30 人不会自动解约，由你安排出售或外租；人数降至 30 人以下才能继续买入或租入<br>
       • 表现突出的球员会被其他俱乐部盯上（转会页「转会传闻」可见关注度与追求者），窗口内会收到溢价报价，多家竞价时后来者出价更高；可以<b>接受 / 还价 / 拒绝</b>，拒绝豪门报价可能让球员不满<br>
